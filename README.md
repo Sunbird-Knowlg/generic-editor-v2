@@ -31,6 +31,15 @@ npm install @project-sunbird/generic-editor-v2
 
 Peer deps: `react >=18`, `react-dom >=18`.
 
+## Compatibility
+
+| Dependency | Supported |
+|------------|-----------|
+| React / React-DOM | **18.x and 19.x** |
+| Node.js | **>=18** |
+| TypeScript | **>=5** |
+| Module formats | ESM + UMD |
+
 ## Usage (React)
 
 ```tsx
@@ -317,4 +326,4 @@ advanced hosts: `useEditor`, `ContentEditorService`, `UploadService`, `Telemetry
 
 ## License
 
-MIT (or the Sunbird project license, per your distribution).
+MIT — see the repository root for the full licence text.

@@ -4,14 +4,13 @@ on:
   push:
     tags:
       - '*'
-  pull_request:
 
 # Least privilege by default; the publish job needs no extra scopes.
 permissions:
   contents: read
 
 jobs:
-  # ── Lint, test & build: runs on every push and pull_request ──────────────
+  # ── Lint, test & build: gates publish on tag push ────────────────────────
   test:
     name: Lint, Test & Build
     runs-on: ubuntu-22.04

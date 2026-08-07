@@ -52,8 +52,8 @@ const UploadCanvas: React.FC<{ ed: EditorController }> = ({ ed }) => {
   const acceptExts = largeUpload ? LARGE_UPLOAD_EXTENSIONS : ACCEPTED_EXTENSIONS;
   const maxLabel = maxMB >= 1024 && maxMB % 1024 === 0 ? `${maxMB / 1024} GB` : `${maxMB} MB`;
   const formatChips = largeUpload
-    ? ['MP4', 'WebM', 'zip']
-    : ['PDF', 'MP4', 'WebM', 'ePub', 'YouTube', 'H5P', 'HTML zip'];
+    ? ['MP4', 'WebM', 'zip', 'Scorm']
+    : ['PDF', 'MP4', 'WebM', 'ePub', 'YouTube', 'H5P', 'HTML zip', 'Scorm'];
 
   /** Validate then auto-upload immediately (files skip the manual Upload step). */
   const stageFile = (f: File) => {

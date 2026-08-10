@@ -48,6 +48,52 @@ describe('<UploadCanvas /> — file auto-upload', () => {
   });
 });
 
+describe('<UploadCanvas /> — video transcript confirm', () => {
+  it('does not auto-upload a video file - shows the generate-transcripts confirm step instead', () => {
+    const uploadFile = vi.fn();
+    const ed = openUpload({ uploadFile });
+    const { container } = render(<UploadCanvas ed={ed} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [fileOf('lecture.mp4', 2048, 'video/mp4')] } });
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(screen.getByText('lecture.mp4')).toBeInTheDocument();
+    expect(screen.getByText(/generate transcripts/i)).toBeInTheDocument();
+  });
+
+  it('uploads with generateTranscripts=true by default when confirmed', () => {
+    const uploadFile = vi.fn();
+    const ed = openUpload({ uploadFile });
+    const { container } = render(<UploadCanvas ed={ed} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [fileOf('lecture.webm', 2048, 'video/webm')] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Upload' }));
+    expect(uploadFile).toHaveBeenCalledTimes(1);
+    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'lecture.webm' }), true);
+  });
+
+  it('uploads with generateTranscripts=false when the checkbox is unchecked', () => {
+    const uploadFile = vi.fn();
+    const ed = openUpload({ uploadFile });
+    const { container } = render(<UploadCanvas ed={ed} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [fileOf('lecture.mp4', 2048, 'video/mp4')] } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Upload' }));
+    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'lecture.mp4' }), false);
+  });
+
+  it('clears the pending video on Remove without uploading', () => {
+    const uploadFile = vi.fn();
+    const ed = openUpload({ uploadFile });
+    const { container } = render(<UploadCanvas ed={ed} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [fileOf('lecture.mp4', 2048, 'video/mp4')] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(screen.queryByText('lecture.mp4')).not.toBeInTheDocument();
+    expect(uploadFile).not.toHaveBeenCalled();
+  });
+});
+
 describe('<UploadCanvas /> — link upload', () => {
   it('keeps a manual Upload button and calls uploadFromUrl on click', () => {
     const uploadFromUrl = vi.fn();

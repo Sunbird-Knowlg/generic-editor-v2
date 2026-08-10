@@ -2,12 +2,12 @@ import React from 'react';
 import type { EditorController } from '../useEditor';
 import { t } from '../i18n/i18n';
 import {
-  ImageIcon, PencilIcon, SaveIcon, CloseIcon, SendIcon, UserPlusIcon, CheckIcon, CommentIcon,
+  ImageIcon, PencilIcon, SaveIcon, CloseIcon, SendIcon, UserPlusIcon, CheckIcon, CommentIcon, CaptionsIcon,
 } from '../icons';
 import { STATUS } from '../constants';
 
 const Header: React.FC<{ ed: EditorController }> = ({ ed }) => {
-  const { content, lang, mode, setDrawer, saveDraft, close, busy, busyAction, setReviewErrors, setReviewSubmitMode, headerLogo, hasReviewComments } = ed;
+  const { content, lang, mode, setDrawer, saveDraft, close, busy, busyAction, setReviewErrors, setReviewSubmitMode, headerLogo, hasReviewComments, hasTranscripts } = ed;
   const savingDraft = busyAction === 'save-draft';
   const hasContent = !!content?.identifier && ed.view === 'player';
   const isDraft = (content?.status ?? STATUS.DRAFT) === STATUS.DRAFT;
@@ -58,6 +58,19 @@ const Header: React.FC<{ ed: EditorController }> = ({ ed }) => {
             aria-label={t(lang, 'ADD_COLLABORATORS')}
           >
             <UserPlusIcon size={16} />
+          </button>
+        )}
+
+        {hasContent && hasTranscripts && (
+          <button
+            type="button"
+            className="ce-icon-btn"
+            onClick={() => setDrawer('transcripts')}
+            disabled={busy}
+            data-tooltip={t(lang, 'VIEW_TRANSCRIPT')}
+            aria-label={t(lang, 'VIEW_TRANSCRIPT')}
+          >
+            <CaptionsIcon size={16} />
           </button>
         )}
 

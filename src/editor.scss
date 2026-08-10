@@ -2341,6 +2341,13 @@
   padding: 14px 18px 22px;
 }
 
+/* The video generate-transcripts confirm panel (file row + checkbox + hint +
+   actions) is taller than the fixed drop-area height - let it grow instead. */
+.ce-area.ce-area--tall {
+  height: auto;
+  min-height: 216px;
+}
+
 .ce-area-head {
   display: flex;
   justify-content: center;
@@ -2477,6 +2484,59 @@
   margin-top: 2px;
 }
 
+.ce-video-confirm {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ce-transcript-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+
+.ce-transcript-check input[type='checkbox'] {
+  margin-top: 2px;
+  accent-color: var(--ce-primary);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.ce-transcript-check-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ce-ink);
+}
+
+.ce-transcript-check-hint {
+  display: block;
+  font-size: 12px;
+  color: var(--ce-slate-500);
+  margin-top: 2px;
+}
+
+.ce-video-confirm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+}
+
+.ce-video-confirm-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 12px;
+}
+
 .ce-uploading-ring-wrap {
   display: flex;
   flex-direction: column;
@@ -2580,6 +2640,241 @@
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+/* ============================ TRANSCRIPTS DRAWER ============================ */
+.ce-transcripts-subtitle {
+  font-size: 12.5px;
+  color: var(--ce-slate-500);
+  margin: 0 0 16px 0;
+}
+
+.ce-transcripts-note {
+  font-size: 12px;
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  /* Inset shadow instead of border-left: a differently-sized border-left doesn't
+     follow border-radius's curve cleanly and looks pinched at the corners. */
+  box-shadow: inset 3px 0 0 0 #2563eb;
+  border-radius: 8px;
+  padding: 8px 10px 8px 13px;
+  margin: 0 0 10px 0;
+  line-height: 1.4;
+}
+
+.ce-transcripts-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 40px 16px;
+  color: var(--ce-slate-500);
+}
+
+.ce-transcripts-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ce-ink);
+  margin: 6px 0 0 0;
+}
+
+.ce-transcripts-empty-sub {
+  font-size: 12.5px;
+  margin: 0;
+  max-width: 260px;
+}
+
+.ce-transcript-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ce-transcript-card {
+  border-radius: 12px;
+  border: 1.5px solid var(--ce-border-2);
+  padding: 14px;
+  background: var(--ce-white);
+}
+
+.ce-transcript-card--live { border-color: rgba(22, 163, 74, 0.35); background: rgba(22, 163, 74, 0.05); }
+.ce-transcript-card--review { border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.06); }
+.ce-transcript-card--processing { border-color: rgba(37, 99, 235, 0.3); background: rgba(37, 99, 235, 0.05); }
+.ce-transcript-card--failed { border-color: rgba(220, 38, 38, 0.3); background: rgba(220, 38, 38, 0.05); }
+
+.ce-transcript-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ce-transcript-avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--ce-primary);
+  color: var(--ce-white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ce-transcript-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.ce-transcript-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ce-ink);
+}
+
+.ce-transcript-source-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ce-primary);
+  background: var(--ce-primary-tint);
+  border: 1px solid var(--ce-primary-border);
+  border-radius: 20px;
+  padding: 1px 7px;
+}
+
+.ce-transcript-sub {
+  font-size: 12px;
+  color: var(--ce-slate-500);
+  margin-top: 2px;
+}
+
+.ce-transcript-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ce-transcript-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.ce-transcript-status--live { color: #16a34a; }
+.ce-transcript-status--live .ce-transcript-status-dot { background: #16a34a; }
+.ce-transcript-status--review { color: #b45309; }
+.ce-transcript-status--review .ce-transcript-status-dot { background: #f59e0b; }
+.ce-transcript-status--processing { color: #2563eb; }
+.ce-transcript-status--processing .ce-transcript-status-dot { background: #2563eb; }
+.ce-transcript-status--failed { color: #dc2626; }
+.ce-transcript-status--failed .ce-transcript-status-dot { background: #dc2626; }
+
+.ce-transcript-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ce-transcript-back {
+  padding: 0;
+  margin-bottom: 12px;
+}
+
+.ce-transcript-segments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ce-transcript-segments-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ce-ink);
+}
+
+.ce-transcript-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ce-transcript-action-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ce-transcript-segment-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ce-transcript-segment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ce-transcript-segment {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--ce-bg-2);
+}
+
+.ce-transcript-segment-time {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ce-slate-500);
+  font-variant-numeric: tabular-nums;
+  padding-top: 1px;
+}
+
+.ce-transcript-segment-text {
+  font-size: 13px;
+  color: var(--ce-ink-2);
+  line-height: 1.4;
+}
+
+.ce-transcript-segment-input {
+  flex: 1;
+  min-height: 44px;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  border: 1.5px solid var(--ce-border);
+  border-radius: 8px;
+  color: var(--ce-ink);
+  font-family: var(--ce-font);
+  background: var(--ce-white);
+  outline: none;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.ce-transcript-segment-input:focus {
+  border-color: var(--ce-primary);
 }
 
 /* ============================================================

@@ -122,7 +122,34 @@ export interface AssetItem {
   mimeType?: string;
 }
 
-export type DrawerKind = 'metadata' | 'collaborator' | 'review' | 'reviewComments' | null;
+export type DrawerKind = 'metadata' | 'collaborator' | 'review' | 'reviewComments' | 'transcripts' | null;
+
+/** A single language's transcript, as returned under content.enrichment.transcripts
+ *  (only populated when the read is made with ?enrich=all). */
+export interface RawTranscript {
+  identifier?: string;
+  code?: string;
+  language: string;
+  languageCode?: string;
+  /** 'Live' | 'Draft' | 'Processing' | 'Failed' - draft/processing/failed are never
+   *  shown to a viewer, only surfaced here for the creator's review. */
+  status?: string;
+  sourceLanguage?: boolean;
+  captionsUrl?: string;
+  artifactUrl?: string;
+  generatedOn?: string;
+  generatedBy?: string;
+}
+
+/** One cue from a transcript's artifactUrl JSON (transcript.json). `id` identifies
+ *  the segment's position for the update API - always present when sending an
+ *  edit back, even though it may be absent on the raw read. */
+export interface TranscriptSegment {
+  id: number;
+  text: string;
+  start?: number;
+  end?: number;
+}
 
 export interface UploadProgress {
   /** 0–100 */

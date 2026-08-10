@@ -15,7 +15,7 @@ import type { TelemetryEvent } from './telemetry/telemetry.types';
 import { t, tf } from './i18n/i18n';
 import {
   DEFAULT_MAX_FILE_SIZE_MB, DEFAULT_PRIMARY_CATEGORIES, EDITOR_EVENTS,
-  IDLE_TIMEOUT_MS, LARGE_UPLOAD_EXTENSIONS, LARGE_UPLOAD_MAX_MB, STATUS,
+  IDLE_TIMEOUT_MS, isVideoMimeType, LARGE_UPLOAD_EXTENSIONS, LARGE_UPLOAD_MAX_MB, STATUS,
 } from './constants';
 
 export interface UseEditorOptions {
@@ -109,6 +109,8 @@ export function useEditor(opts: UseEditorOptions) {
   const [contentType, setContentType] = useState<string>('');
   const [uploadUrl, setUploadUrl] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
+  /** The upload-time "generate transcripts?" choice for video content - persists past the
+   *  upload step so Edit Content Details can show/edit it and submit-for-review can act on it. */
   const [busy, setBusy] = useState(false);
   /** Which async action is in flight (drives per-control "saving…" spinners). */
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -246,9 +248,13 @@ export function useEditor(opts: UseEditorOptions) {
     [content, service, context, contentType, reload, emit],
   );
 
-  /* ---- Upload a file ---- */
+  /* ---- Upload a file ----
+   * wantTranscripts reflects the "generate transcripts?" checkbox UploadCanvas shows
+   * for video files. Shown/decided once, right here at upload time - the API call
+   * fires as soon as the upload completes, not deferred to submit-for-review.
+   */
   const uploadFile = useCallback(
-    async (file: File) => {
+    async (file: File, wantTranscripts?: boolean) => {
       if (uploadingRef.current) return; // ignore re-entry (double-click / re-drop)
       if (!content?.identifier && !contentType) {
         showToast(t(lang, 'CONTENT_TYPE_REQUIRED'), 'error');
@@ -276,8 +282,8 @@ export function useEditor(opts: UseEditorOptions) {
       setBusyAction('upload');
       setView('uploading');
       setProgress({ percent: 0, bytesUploaded: 0, totalBytes: file.size });
-      emit(EDITOR_EVENTS.UPLOAD_START, { mimeType, size: file.size });
-      telemetry.current?.interact('click', 'uploadButton', 'upload', { mimeType });
+      emit(EDITOR_EVENTS.UPLOAD_START, { mimeType, size: file.size, generateTranscripts: wantTranscripts });
+      telemetry.current?.interact('click', 'uploadButton', 'upload', { mimeType, generateTranscripts: wantTranscripts });
       try {
         const { id } = await ensureContent(mimeType);
         const signed = await uploader.getPresignedUrl(id, file.name);
@@ -290,6 +296,13 @@ export function useEditor(opts: UseEditorOptions) {
         await reload(id);
         setView('player');
         emit(EDITOR_EVENTS.UPLOAD_COMPLETE, { id });
+        if (wantTranscripts && isVideoMimeType(mimeType)) {
+          // Non-fatal: the upload itself already succeeded - a failed transcript
+          // kickoff shouldn't block or scare the user, just isn't retried here.
+          service.createTranscript(id).catch((err) => {
+            telemetry.current?.error(String((err as Error)?.message ?? err), 'transcript');
+          });
+        }
         setUploadSuccess(true);
         setTimeout(() => setUploadSuccess(false), 2500);
       } catch (err) {
@@ -305,7 +318,7 @@ export function useEditor(opts: UseEditorOptions) {
         if (!cancelledRef.current) setProgress(null);
       }
     },
-    [maxMB, largeUpload, contentType, lang, emit, ensureContent, uploader, reload, content, showToast],
+    [maxMB, largeUpload, contentType, lang, emit, ensureContent, uploader, reload, content, showToast, service],
   );
 
   /* ---- Upload from a URL ---- */
@@ -664,12 +677,26 @@ export function useEditor(opts: UseEditorOptions) {
   /** True when content was rejected and has reviewer suggestions to show. */
   const hasReviewComments = !!(content?.rejectReasons?.length || content?.rejectComment);
 
+  /* ---- Transcripts availability (gates the header's "View transcript" button) ----
+     Video content may have no transcripts yet (generation is opt-in at upload time,
+     and is async even when requested), so the button should only appear once
+     enrichment.transcripts actually has entries. */
+  const [hasTranscripts, setHasTranscripts] = useState(false);
+  useEffect(() => {
+    setHasTranscripts(false);
+    if (!content?.identifier || !isVideoMimeType(content.mimeType)) return;
+    service
+      .readTranscripts(content.identifier)
+      .then((list) => { if (mountedRef.current) setHasTranscripts(list.length > 0); })
+      .catch(() => { if (mountedRef.current) setHasTranscripts(false); });
+  }, [content?.identifier, content?.mimeType, service]);
+
   return {
     // state
     content, view, drawer, toast, progress, contentType, uploadUrl, urlError, busy, busyAction, mode, lang, categories,
     maxMB, largeUpload, headerLogo, previewUrl, previewConfig, framework: context.framework,
     userId: context.user?.id, rootOrgId: context.user?.rootOrgId, userRoles: context.user?.roles ?? [],
-    reviewErrors, uploadSuccess, sessionExpired, assetPicker, reviewSubmitMode, hasReviewComments,
+    reviewErrors, uploadSuccess, sessionExpired, assetPicker, reviewSubmitMode, hasReviewComments, hasTranscripts,
     // setters
     setDrawer: openDrawer, setContentType, setUploadUrl, setUrlError, showToast, setReviewErrors, setReviewSubmitMode,
     dismissSessionExpiry, openAssetPicker, closeAssetPicker,

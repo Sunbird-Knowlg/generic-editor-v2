@@ -23,6 +23,7 @@ import MetadataDrawer from './components/MetadataDrawer';
 import CollaboratorDrawer from './components/CollaboratorDrawer';
 import ReviewDrawer from './components/ReviewDrawer';
 import ReviewCommentsDrawer from './components/ReviewCommentsDrawer';
+import TranscriptsDrawer from './components/TranscriptsDrawer';
 import AssetPickerModal from './components/AssetPickerModal';
 import Toast from './components/Toast';
 import { t } from './i18n/i18n';
@@ -56,6 +57,7 @@ const ContentEditor: React.FC<ContentEditorProps> = (props) => {
       <CollaboratorDrawer ed={ed} />
       <ReviewDrawer ed={ed} />
       <ReviewCommentsDrawer ed={ed} />
+      <TranscriptsDrawer ed={ed} />
       <AssetPickerModal ed={ed} />
 
       <Toast toast={ed.toast} />

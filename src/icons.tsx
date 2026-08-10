@@ -63,6 +63,15 @@ export const FileIcon: React.FC<P> = ({ size = 16, className }) => (
 export const CommentIcon: React.FC<P> = ({ size = 16, className }) => (
   <svg {...base(size)} className={className}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
 );
+/** Subtitle/captions glyph: a screen with two text bars — reads clearly at 16px,
+ *  unlike a literal stroke-only "CC" which blurs into illegibility at that size. */
+export const CaptionsIcon: React.FC<P> = ({ size = 16, className }) => (
+  <svg {...base(size)} className={className}>
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <line x1="6" y1="10" x2="18" y2="10" />
+    <line x1="6" y1="14" x2="14" y2="14" />
+  </svg>
+);
 export const SearchIcon: React.FC<P> = ({ size = 14, className }) => (
   <svg {...base(size)} className={className}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
 );

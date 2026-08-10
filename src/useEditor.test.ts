@@ -1,0 +1,130 @@
+import { renderHook, act, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { useEditor } from './useEditor';
+import type { ContentEditorService } from './services/ContentEditorService';
+import { mockContext } from './test/mockEd';
+import type { ContentData } from './types';
+
+/** A fake service covering everything useEditor + UploadService touch on mount/upload. */
+function svc(over: Record<string, unknown> = {}) {
+  return {
+    readContent: vi.fn(),
+    readPrimaryCategories: vi.fn().mockResolvedValue([]),
+    createLock: vi.fn().mockResolvedValue({}),
+    retireLock: vi.fn().mockResolvedValue(undefined),
+    sendForReview: vi.fn().mockResolvedValue({}),
+    createTranscript: vi.fn().mockResolvedValue({ transcriptId: 't1' }),
+    readTranscripts: vi.fn().mockResolvedValue([]),
+    updateContent: vi.fn().mockResolvedValue({ versionKey: 'vk2' }),
+    readFormFields: vi.fn().mockResolvedValue([{ code: 'name', required: false }]),
+    getBase: () => ({ baseUrl: '', apiSlug: '/action', headers: {}, fetchImpl: fetch }),
+    getEndpoints: () => ({ presigned: 'content/v3/upload/url', uploadFinalize: 'content/v3/upload' }),
+    ...over,
+  } as unknown as ContentEditorService;
+}
+
+function videoContent(over: Partial<ContentData> = {}): ContentData {
+  return {
+    identifier: 'do_video_1',
+    name: 'A video',
+    mimeType: 'video/mp4',
+    primaryCategory: 'Learning Resource',
+    status: 'Draft',
+    versionKey: 'vk1',
+    ...over,
+  } as ContentData;
+}
+
+async function mountWithContent(service: ContentEditorService, content: ContentData) {
+  (service.readContent as ReturnType<typeof vi.fn>).mockResolvedValue(content);
+  const { result } = renderHook(() =>
+    useEditor({ context: mockContext, contentId: content.identifier, service }),
+  );
+  await waitFor(() => expect(result.current.content?.identifier).toBe(content.identifier));
+  return result;
+}
+
+function fakeFile(name: string, sizeBytes = 1024, type = 'video/mp4'): File {
+  const f = new File(['x'], name, { type });
+  Object.defineProperty(f, 'size', { value: sizeBytes });
+  return f;
+}
+
+/** Stubs the 3-call upload pipeline (presign → cloud PUT → finalize) that
+ *  UploadService drives with raw fetch, independent of ContentEditorService. */
+function stubUploadPipeline() {
+  return vi.fn(async (url: string) => {
+    const u = String(url);
+    if (u.includes('upload/url')) return { ok: true, json: async () => ({ result: { pre_signed_url: 'https://blob.test/upload' } }) };
+    if (u === 'https://blob.test/upload') return { ok: true };
+    return { ok: true, json: async () => ({ responseCode: 'OK' }) }; // finalize
+  }) as unknown as typeof fetch;
+}
+
+describe('useEditor — transcript generation on upload', () => {
+  it('calls createTranscript right after a successful video upload when the checkbox was checked', async () => {
+    const service = svc();
+    const result = await mountWithContent(service, videoContent());
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = stubUploadPipeline();
+    try {
+      await act(async () => { await result.current.uploadFile(fakeFile('lecture.mp4'), true); });
+      expect(service.createTranscript).toHaveBeenCalledWith('do_video_1');
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('does not call createTranscript when the checkbox was unchecked (negative)', async () => {
+    const service = svc();
+    const result = await mountWithContent(service, videoContent());
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = stubUploadPipeline();
+    try {
+      await act(async () => { await result.current.uploadFile(fakeFile('lecture.mp4'), false); });
+      expect(service.createTranscript).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('does not call createTranscript for a non-video file even if passed true (negative)', async () => {
+    const service = svc();
+    const result = await mountWithContent(service, videoContent({ mimeType: 'application/pdf' }));
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = stubUploadPipeline();
+    try {
+      await act(async () => { await result.current.uploadFile(fakeFile('doc.pdf', 1024, 'application/pdf'), true); });
+      expect(service.createTranscript).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('a failed transcript kickoff does not block the upload-success path (negative)', async () => {
+    const service = svc({ createTranscript: vi.fn().mockRejectedValue(new Error('boom')) });
+    const result = await mountWithContent(service, videoContent());
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = stubUploadPipeline();
+    try {
+      await act(async () => { await result.current.uploadFile(fakeFile('lecture.mp4'), true); });
+      await waitFor(() => expect(result.current.uploadSuccess).toBe(true));
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('sendForReview no longer triggers createTranscript - that now happens at upload time (negative)', async () => {
+    const service = svc();
+    const result = await mountWithContent(service, videoContent());
+    await act(async () => { await result.current.sendForReview(); });
+    expect(service.createTranscript).not.toHaveBeenCalled();
+  });
+
+  it('saveMetadataAndSubmit no longer triggers createTranscript (negative)', async () => {
+    const service = svc();
+    const result = await mountWithContent(service, videoContent());
+    await act(async () => { await result.current.saveMetadataAndSubmit({ name: 'A video (edited)' }); });
+    expect(service.createTranscript).not.toHaveBeenCalled();
+  });
+});

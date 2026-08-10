@@ -1,8 +1,38 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import type { EditorController } from '../useEditor';
-import type { ContentData, EditorContext } from '../types';
+import type { ContentData, EditorContext, RawTranscript } from '../types';
 import { getMimeTypeLabel, t } from '../i18n/i18n';
 import { FileIcon } from '../icons';
+import { isVideoMimeType } from '../constants';
+
+interface PlayerTranscript {
+  language: string;
+  identifier: string;
+  languageCode: string;
+  artifactUrl: string;
+  wordByWordUrl?: string;
+  sourceLanguage?: boolean;
+}
+
+/**
+ * Maps enrichment.transcripts (raw) into the shape sunbird-video-player expects -
+ * mirrors the portal's ContentService.contentRead mapping exactly, since the legacy
+ * preview iframe's video sub-player is the same component. artifactUrl here must be
+ * the VTT (captionsUrl), not the raw transcript.json.
+ */
+function mapRawTranscripts(raw: RawTranscript[]): PlayerTranscript[] {
+  return raw
+    .filter((e): e is RawTranscript & { captionsUrl: string } =>
+      !!e.captionsUrl && (e.status ?? 'Live').toLowerCase() === 'live')
+    .map((e) => ({
+      language: e.language || (e.languageCode || 'Unknown').toUpperCase(),
+      identifier: e.code ?? e.identifier ?? '',
+      languageCode: e.languageCode || '',
+      artifactUrl: e.captionsUrl,
+      wordByWordUrl: e.captionsUrl,
+      sourceLanguage: !!e.sourceLanguage,
+    }));
+}
 
 /**
  * Preview via the legacy ekstep content renderer — the same mechanism the old
@@ -55,8 +85,25 @@ const RendererPreview: React.FC<{
 };
 
 const EditorPreview: React.FC<{ ed: EditorController; context: EditorContext }> = ({ ed, context }) => {
-  const { content, lang, previewUrl, previewConfig } = ed;
+  const { content, lang, previewUrl, previewConfig, service } = ed;
+  const [transcripts, setTranscripts] = useState<PlayerTranscript[]>([]);
+
+  useEffect(() => {
+    setTranscripts([]);
+    if (!content?.identifier || !isVideoMimeType(content.mimeType)) return;
+    service
+      .readTranscripts(content.identifier)
+      .then((raw) => setTranscripts(mapRawTranscripts(raw)))
+      .catch(() => setTranscripts([]));
+  }, [content?.identifier, content?.mimeType, service]);
+
   if (!content) return null;
+
+  // Merging transcripts changes content's identity without changing identifier/artifactUrl,
+  // so the iframe key below also folds in transcripts.length - forcing exactly one remount
+  // (+ one re-init) once they arrive, instead of silently never surfacing them. Acceptable
+  // here (unlike a live learner player) since this is the creator's own edit-time preview.
+  const previewMetadata = transcripts.length ? { ...content, transcripts } : content;
 
   return (
     <div className="ce-preview-card">
@@ -68,8 +115,8 @@ const EditorPreview: React.FC<{ ed: EditorController; context: EditorContext }> 
       </div>
       <div className="ce-preview-frame">
         <RendererPreview
-          key={`${content.identifier}-${content.artifactUrl ?? ''}`}
-          content={content}
+          key={`${content.identifier}-${content.artifactUrl ?? ''}-${transcripts.length}`}
+          content={previewMetadata}
           context={context}
           previewUrl={previewUrl}
           previewConfig={previewConfig}

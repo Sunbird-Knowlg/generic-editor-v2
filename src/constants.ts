@@ -32,6 +32,16 @@ export const MIME_URL = 'text/x-url';
 /** Accepted upload extensions (for the dropzone hint + file picker). */
 export const ACCEPTED_EXTENSIONS = ['pdf', 'mp4', 'epub', 'webm', 'h5p', 'zip'] as const;
 
+/** Extensions that map to a video/* mimeType - gate the "generate transcripts?" prompt. */
+export const VIDEO_EXTENSIONS = ['mp4', 'webm'] as const;
+
+/** mimeTypes that get a transcript checkbox (upload confirm + Edit Content Details). */
+export const VIDEO_MIME_TYPES = ['video/mp4', 'video/webm'] as const;
+
+export function isVideoMimeType(mimeType?: string): boolean {
+  return !!mimeType && (VIDEO_MIME_TYPES as readonly string[]).includes(mimeType);
+}
+
 /** Default max upload size in MB (configurable via EditorConfig.maxFileSizeMB). */
 export const DEFAULT_MAX_FILE_SIZE_MB = 150;
 

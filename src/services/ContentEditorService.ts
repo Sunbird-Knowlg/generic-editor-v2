@@ -10,7 +10,7 @@
  * framework/form = v1. All go through /action → knowledge-mw. Override via
  * `endpoints` if a deployment differs.
  */
-import type { ContentData, EditorContext, EditorConfig, FrameworkCategory, FormField, AssetItem } from '../types';
+import type { ContentData, EditorContext, EditorConfig, FrameworkCategory, FormField, AssetItem, RawTranscript, TranscriptSegment } from '../types';
 
 const DEFAULT_ENDPOINTS = {
   /* Versions verified against the portal's working ContentService + the old generic
@@ -34,6 +34,16 @@ const DEFAULT_ENDPOINTS = {
   userSearch: 'user/v1/search',
   reviewCommentCreate: 'review/comment/v1/create/comment',
   reviewCommentRead: 'review/comment/v1/read/comment',
+  transcriptCreate: 'content/v4/enrichment/object/create',
+  transcriptUpdate: 'content/v4/enrichment/object/update',
+  transcriptApprove: 'content/v4/enrichment/object/approve',
+  transcriptReject: 'content/v4/enrichment/object/reject',
+  /* v1, not v3 (this.ep.read) - only v1+enrich=all is confirmed to return
+     enrichment.transcripts, and only via the /portal/* proxy route (Kong's v1
+     compat alias for v3), not /action/* (direct to knowledge-mw, v1 404s there).
+     readTranscripts() builds its URL with a hardcoded '/portal' prefix, bypassing
+     this.apiSlug entirely - see its own comment. */
+  transcriptsRead: 'content/v1/read',
 } as const;
 
 export type EndpointMap = Partial<typeof DEFAULT_ENDPOINTS>;
@@ -111,12 +121,14 @@ export class ContentEditorService {
     method: string,
     path: string,
     body?: unknown,
+    opts?: { cache?: RequestCache },
   ): Promise<T> {
     const resp = await this.fetchImpl(this.url(path), {
       method,
       headers: this.headers,
       credentials: 'same-origin',
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      ...(opts?.cache ? { cache: opts.cache } : {}),
     });
     // A malformed/unparseable body must NOT be read as success — every Sunbird action API
     // returns a JSON envelope, so a parse failure means the write likely never landed.
@@ -174,10 +186,15 @@ export class ContentEditorService {
     return String(result.identifier ?? result.node_id ?? '');
   }
 
-  /** GET content/v3/read/{id}?mode=edit */
+  /**
+   * GET content/v3/read/{id}?mode=edit — no-store: this is the editor's own read of the
+   * content it's actively mutating (save/publish/reject/upload all happen on this same
+   * page), so a stale cached response would show pre-action state right after an action
+   * completes. Other GETs in this service are left on default caching.
+   */
   async readContent(contentId: string, mode = 'edit'): Promise<ContentData> {
     const path = `${this.ep.read}/${encodeURIComponent(contentId)}?mode=${mode}&fields=${READ_FIELDS}`;
-    const result = await this.request<{ content: Record<string, unknown> }>('GET', path);
+    const result = await this.request<{ content: Record<string, unknown> }>('GET', path, undefined, { cache: 'no-store' });
     return normalizeContent(result.content);
   }
 
@@ -198,6 +215,67 @@ export class ContentEditorService {
     return this.request('POST', `${this.ep.review}/${encodeURIComponent(contentId)}`, {
       request: { content: {} },
     });
+  }
+
+  /** POST content/v4/enrichment/object/create/{id} — kicks off async transcript generation. */
+  async createTranscript(contentId: string): Promise<{ identifier?: string; transcriptId?: string; message?: string }> {
+    return this.request('POST', `${this.ep.transcriptCreate}/${encodeURIComponent(contentId)}`, {
+      request: { object: { objectType: 'Transcript' } },
+    });
+  }
+
+  /** PATCH content/v4/enrichment/object/update/{contentId}/{transcriptId} — persists
+   *  an edited language's full segment list (the API expects the whole set back, not a diff). */
+  async updateTranscript(contentId: string, transcriptId: string, segments: TranscriptSegment[]): Promise<unknown> {
+    return this.request(
+      'PATCH',
+      `${this.ep.transcriptUpdate}/${encodeURIComponent(contentId)}/${encodeURIComponent(transcriptId)}`,
+      { request: { object: { objectType: 'Transcript', segments } } },
+    );
+  }
+
+  /** POST content/v4/enrichment/object/approve/{contentId}/{transcriptId} — only valid
+   *  while the transcript is Review; the backend 400s with ERR_TRANSCRIPT_NOT_IN_REVIEW otherwise. */
+  async approveTranscript(contentId: string, transcriptId: string): Promise<unknown> {
+    return this.request(
+      'POST',
+      `${this.ep.transcriptApprove}/${encodeURIComponent(contentId)}/${encodeURIComponent(transcriptId)}`,
+      { request: { object: { objectType: 'Transcript' } } },
+    );
+  }
+
+  /** POST content/v4/enrichment/object/reject/{contentId}/{transcriptId} — only valid while
+   *  the transcript is Review; resets it to Draft so it can be regenerated/re-uploaded. */
+  async rejectTranscript(contentId: string, transcriptId: string): Promise<unknown> {
+    return this.request(
+      'POST',
+      `${this.ep.transcriptReject}/${encodeURIComponent(contentId)}/${encodeURIComponent(transcriptId)}`,
+      { request: { object: { objectType: 'Transcript' } } },
+    );
+  }
+
+  /**
+   * GET /portal/content/v1/read/{id}?enrich=all — just the transcript list, for the
+   * Transcripts drawer. Deliberately bypasses this.request()/this.apiSlug ('/action'):
+   * v1/read only exists as a Kong compatibility alias for v3/read, and /action routes
+   * go straight to knowledge-mw (no Kong in front), so it 404s there. The portal's own
+   * ContentService hits this same v1/read+enrich=all combo successfully via its default
+   * '/portal' apiPrefix - matching that path here is what actually works.
+   */
+  async readTranscripts(contentId: string): Promise<RawTranscript[]> {
+    const url = `${this.baseUrl}/portal/${this.ep.transcriptsRead}/${encodeURIComponent(contentId)}?fields=identifier&enrich=all`;
+    // no-store: transcript status changes server-side on its own (Processing → Review →
+    // Live) and via approve/reject, invisibly to the browser's HTTP cache - a cached 304
+    // here can serve a stale status long after the backend has moved on.
+    const resp = await this.fetchImpl(url, { method: 'GET', headers: this.headers, credentials: 'same-origin', cache: 'no-store' });
+    let data: { result?: { content?: { enrichment?: { transcripts?: RawTranscript[] } } }; responseCode?: string; params?: { errmsg?: string } } = {};
+    let parseFailed = false;
+    try { data = await resp.json(); } catch { parseFailed = true; }
+    if (!resp.ok || parseFailed || (data.responseCode && data.responseCode !== 'OK' && data.responseCode !== 'ok')) {
+      throw new Error(data?.params?.errmsg
+        || (parseFailed ? `Malformed response (${resp.status}) for ${url}` : `Request failed (${resp.status}) for ${url}`));
+    }
+    return data.result?.content?.enrichment?.transcripts ?? [];
   }
 
   /** POST content/v1/publish/{id} */

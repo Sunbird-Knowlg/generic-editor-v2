@@ -41,4 +41,30 @@ describe('<Header />', () => {
     fireEvent.click(btn);
     expect(publish).toHaveBeenCalled();
   });
+
+  it('shows "View transcript" for video content once transcripts exist, and opens the drawer', () => {
+    const setDrawer = vi.fn();
+    const ed = makeEd({
+      view: 'player', mode: 'edit', setDrawer, hasTranscripts: true,
+      content: { ...mockContent, mimeType: 'video/mp4' },
+    });
+    render(<Header ed={ed} />);
+    fireEvent.click(screen.getByRole('button', { name: 'View transcript' }));
+    expect(setDrawer).toHaveBeenCalledWith('transcripts');
+  });
+
+  it('hides "View transcript" for video content with no transcripts yet (negative)', () => {
+    const ed = makeEd({
+      view: 'player', mode: 'edit', hasTranscripts: false,
+      content: { ...mockContent, mimeType: 'video/mp4' },
+    });
+    render(<Header ed={ed} />);
+    expect(screen.queryByRole('button', { name: 'View transcript' })).not.toBeInTheDocument();
+  });
+
+  it('hides "View transcript" for non-video content (negative)', () => {
+    const ed = makeEd({ view: 'player', mode: 'edit', content: { ...mockContent, mimeType: 'application/pdf' } });
+    render(<Header ed={ed} />);
+    expect(screen.queryByRole('button', { name: 'View transcript' })).not.toBeInTheDocument();
+  });
 });

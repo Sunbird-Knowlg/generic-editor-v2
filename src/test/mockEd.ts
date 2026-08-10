@@ -36,6 +36,11 @@ export function mockService(over: Record<string, unknown> = {}): ContentEditorSe
     readContent: vi.fn().mockResolvedValue(mockContent),
     createLock: vi.fn().mockResolvedValue({}),
     retireLock: vi.fn().mockResolvedValue(undefined),
+    readTranscripts: vi.fn().mockResolvedValue([]),
+    createTranscript: vi.fn().mockResolvedValue({ transcriptId: 't1' }),
+    updateTranscript: vi.fn().mockResolvedValue({}),
+    approveTranscript: vi.fn().mockResolvedValue({}),
+    rejectTranscript: vi.fn().mockResolvedValue({}),
     ...over,
   } as unknown as ContentEditorService;
 }

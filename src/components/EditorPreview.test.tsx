@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import EditorPreview from './EditorPreview';
-import { makeEd, mockContext, mockContent } from '../test/mockEd';
+import { makeEd, mockContext, mockContent, mockService } from '../test/mockEd';
 
 describe('<EditorPreview />', () => {
   it('renders nothing when there is no content (negative)', () => {
@@ -30,5 +30,26 @@ describe('<EditorPreview />', () => {
     const ed = makeEd({ content: mockContent, previewUrl: '/preview.html?foo=1' });
     const { container } = render(<EditorPreview ed={ed} context={mockContext} />);
     expect(container.querySelector('iframe')).toHaveAttribute('src', '/preview.html?foo=1&webview=true');
+  });
+
+  it('does not fetch transcripts for non-video content (negative)', () => {
+    const service = mockService();
+    const ed = makeEd({ content: mockContent, service }); // mockContent is application/pdf
+    render(<EditorPreview ed={ed} context={mockContext} />);
+    expect(service.readTranscripts).not.toHaveBeenCalled();
+  });
+
+  it('fetches and maps transcripts for video content, remounting the iframe once they arrive', async () => {
+    const service = mockService({
+      readTranscripts: vi.fn().mockResolvedValue([
+        { code: 'c_en', language: 'English', languageCode: 'en', captionsUrl: 'https://x/en.vtt', status: 'Live', sourceLanguage: true },
+        { code: 'c_fr', language: 'French', languageCode: 'fr', status: 'Draft' }, // filtered: not Live
+      ]),
+    });
+    const videoContent = { ...mockContent, mimeType: 'video/mp4' };
+    const ed = makeEd({ content: videoContent, service });
+    const { container } = render(<EditorPreview ed={ed} context={mockContext} />);
+    await waitFor(() => expect(service.readTranscripts).toHaveBeenCalledWith('do_1'));
+    await waitFor(() => expect(container.querySelector('iframe')).toBeInTheDocument());
   });
 });

@@ -1,8 +1,4 @@
-/**
- * useEditor — the editor controller. Owns content + view state and orchestrates
- * the services (content CRUD, upload, telemetry). UI components are thin and call
- * these actions.
- */
+/** useEditor — the editor controller; owns content/view state and orchestrates services while UI components stay thin and just call its actions. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ContentData, DrawerKind, EditorConfig, EditorContext, EditorEventPayload,
@@ -109,8 +105,6 @@ export function useEditor(opts: UseEditorOptions) {
   const [contentType, setContentType] = useState<string>('');
   const [uploadUrl, setUploadUrl] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
-  /** The upload-time "generate transcripts?" choice for video content - persists past the
-   *  upload step so Edit Content Details can show/edit it and submit-for-review can act on it. */
   const [busy, setBusy] = useState(false);
   /** Which async action is in flight (drives per-control "saving…" spinners). */
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -248,11 +242,7 @@ export function useEditor(opts: UseEditorOptions) {
     [content, service, context, contentType, reload, emit],
   );
 
-  /* ---- Upload a file ----
-   * wantTranscripts reflects the "generate transcripts?" checkbox UploadCanvas shows
-   * for video files. Shown/decided once, right here at upload time - the API call
-   * fires as soon as the upload completes, not deferred to submit-for-review.
-   */
+  /* ---- Upload a file --- wantTranscripts is the upload-time "generate transcripts?" checkbox value; it fires the API call right after upload completes, not deferred to submit-for-review. */
   const uploadFile = useCallback(
     async (file: File, wantTranscripts?: boolean) => {
       if (uploadingRef.current) return; // ignore re-entry (double-click / re-drop)
@@ -470,10 +460,7 @@ export function useEditor(opts: UseEditorOptions) {
     return errs;
   }, [content, lang]);
 
-  /**
-   * Async variant: fetches form/read with action='review' to get required fields
-   * dynamically, then validates content against them. Falls back to static list on error.
-   */
+  /** Async variant: validates against dynamically-fetched review-form required fields, falling back to the static list on error. */
   const validateForReviewAsync = useCallback(async (override?: ContentData): Promise<string[]> => {
     const c = override ?? content;
     if (!c) return [t(lang, 'ERROR_LOAD')];
@@ -523,10 +510,7 @@ export function useEditor(opts: UseEditorOptions) {
     }
   }, [content, service, emit, lang, showToast, onClose]);
 
-  /**
-   * Save-edited-metadata then submit for review (the "Send for review" → edit details → submit flow).
-   * Persists fields first, re-validates against the review form, and only sends if valid.
-   */
+  /** Saves edited metadata, re-validates against the review form, and only submits for review if valid. */
   const saveMetadataAndSubmit = useCallback(
     async (fields: Record<string, unknown>) => {
       if (!content?.identifier) return;
@@ -633,10 +617,7 @@ export function useEditor(opts: UseEditorOptions) {
     onClose?.();
   }, [content, service, emit, onClose]);
 
-  /* ---- Inactivity / session-timeout prompt ----
-     Mirrors the old editor's "session timed out due to inactivity" popup.
-     A 30-min idle timer reset on user activity; on fire it shows a prompt with
-     Continue / Close Editor. Telemetry fires on prompt + resolution. */
+  /* ---- Inactivity / session-timeout prompt: mirrors the old editor's idle-timeout popup, resetting a timer on activity and showing Continue/Close when it fires. */
   const dismissSessionExpiry = useCallback(() => {
     setSessionExpired(false);
     telemetry.current?.interact('click', 'sessionPrompt', 'continue');
@@ -677,18 +658,26 @@ export function useEditor(opts: UseEditorOptions) {
   /** True when content was rejected and has reviewer suggestions to show. */
   const hasReviewComments = !!(content?.rejectReasons?.length || content?.rejectComment);
 
-  /* ---- Transcripts availability (gates the header's "View transcript" button) ----
-     Video content may have no transcripts yet (generation is opt-in at upload time,
-     and is async even when requested), so the button should only appear once
-     enrichment.transcripts actually has entries. */
+  /* ---- Transcripts availability: gates the header's "View transcript" button, polling readTranscripts until entries actually exist since generation is async and can take a while. */
   const [hasTranscripts, setHasTranscripts] = useState(false);
   useEffect(() => {
     setHasTranscripts(false);
     if (!content?.identifier || !isVideoMimeType(content.mimeType)) return;
-    service
-      .readTranscripts(content.identifier)
-      .then((list) => { if (mountedRef.current) setHasTranscripts(list.length > 0); })
-      .catch(() => { if (mountedRef.current) setHasTranscripts(false); });
+    const id = content.identifier;
+    let found = false;
+    const check = () => {
+      service
+        .readTranscripts(id)
+        .then((list) => {
+          if (!mountedRef.current || found) return;
+          found = list.length > 0;
+          setHasTranscripts(found);
+        })
+        .catch(() => { if (mountedRef.current && !found) setHasTranscripts(false); });
+    };
+    check();
+    const interval = setInterval(() => { if (found) clearInterval(interval); else check(); }, 20000);
+    return () => clearInterval(interval);
   }, [content?.identifier, content?.mimeType, service]);
 
   return {

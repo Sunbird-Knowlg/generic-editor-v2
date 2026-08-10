@@ -1,20 +1,8 @@
-/**
- * ContentEditorService — backend abstraction for the editor.
- *
- * All calls go to relative `/action/...` by default (same-origin). In the portal
- * these are proxied to knowledge-mw / Kong with the session cookie — exactly how
- * the old AngularJS generic editor used `apislug: '/action'`. Standalone hosts can
- * override baseUrl / headers via EditorConfig.
- *
- * Endpoint versions: create/read/update/upload/review = v3, publish/reject/lock/
- * framework/form = v1. All go through /action → knowledge-mw. Override via
- * `endpoints` if a deployment differs.
- */
+/** ContentEditorService — backend abstraction for the editor; calls go to relative `/action/...` (proxied to knowledge-mw/Kong) by default, overridable via EditorConfig. */
 import type { ContentData, EditorContext, EditorConfig, FrameworkCategory, FormField, AssetItem, RawTranscript, TranscriptSegment } from '../types';
 
 const DEFAULT_ENDPOINTS = {
-  /* Versions verified against the portal's working ContentService + the old generic
-     editor's real calls + the backend proxy (upload = v3). All hit /action → knowledge-mw. */
+  /* Versions verified against the portal's ContentService, the old generic editor, and the backend proxy; all hit /action → knowledge-mw. */
   create: 'content/v3/create',
   read: 'content/v3/read',
   update: 'content/v3/update',
@@ -38,11 +26,7 @@ const DEFAULT_ENDPOINTS = {
   transcriptUpdate: 'content/v4/enrichment/object/update',
   transcriptApprove: 'content/v4/enrichment/object/approve',
   transcriptReject: 'content/v4/enrichment/object/reject',
-  /* v1, not v3 (this.ep.read) - only v1+enrich=all is confirmed to return
-     enrichment.transcripts, and only via the /portal/* proxy route (Kong's v1
-     compat alias for v3), not /action/* (direct to knowledge-mw, v1 404s there).
-     readTranscripts() builds its URL with a hardcoded '/portal' prefix, bypassing
-     this.apiSlug entirely - see its own comment. */
+  /* v1, not v3 - only v1+enrich=all via the /portal/* proxy route is confirmed to return enrichment.transcripts (see readTranscripts()'s own comment). */
   transcriptsRead: 'content/v1/read',
 } as const;
 
@@ -93,9 +77,7 @@ export class ContentEditorService {
   constructor(config: EditorConfig = {}, endpoints?: EndpointMap, context?: EditorContext) {
     this.baseUrl = (config.baseUrl ?? '').replace(/\/$/, '');
     this.apiSlug = config.apiSlug ?? '/action';
-    // knowledge-mw / lock service require these device + client headers (the old
-    // generic editor sent them on every /action call). Derive from the editor
-    // context; explicit config.headers always win.
+    // knowledge-mw/lock require these device+client headers on every /action call; explicit config.headers always win.
     const did = context?.did || (typeof localStorage !== 'undefined' ? localStorage.getItem('deviceId') || '' : '');
     const contextHeaders: Record<string, string> = {
       'X-Requested-With': 'XMLHttpRequest',
@@ -186,12 +168,7 @@ export class ContentEditorService {
     return String(result.identifier ?? result.node_id ?? '');
   }
 
-  /**
-   * GET content/v3/read/{id}?mode=edit — no-store: this is the editor's own read of the
-   * content it's actively mutating (save/publish/reject/upload all happen on this same
-   * page), so a stale cached response would show pre-action state right after an action
-   * completes. Other GETs in this service are left on default caching.
-   */
+  /** GET content/v3/read/{id}?mode=edit — no-store, since this page re-reads its own content right after mutating it. */
   async readContent(contentId: string, mode = 'edit'): Promise<ContentData> {
     const path = `${this.ep.read}/${encodeURIComponent(contentId)}?mode=${mode}&fields=${READ_FIELDS}`;
     const result = await this.request<{ content: Record<string, unknown> }>('GET', path, undefined, { cache: 'no-store' });
@@ -224,8 +201,7 @@ export class ContentEditorService {
     });
   }
 
-  /** PATCH content/v4/enrichment/object/update/{contentId}/{transcriptId} — persists
-   *  an edited language's full segment list (the API expects the whole set back, not a diff). */
+  /** PATCH content/v4/enrichment/object/update/{contentId}/{transcriptId} — persists the full segment list (the API expects the whole set, not a diff). */
   async updateTranscript(contentId: string, transcriptId: string, segments: TranscriptSegment[]): Promise<unknown> {
     return this.request(
       'PATCH',
@@ -234,8 +210,7 @@ export class ContentEditorService {
     );
   }
 
-  /** POST content/v4/enrichment/object/approve/{contentId}/{transcriptId} — only valid
-   *  while the transcript is Review; the backend 400s with ERR_TRANSCRIPT_NOT_IN_REVIEW otherwise. */
+  /** POST content/v4/enrichment/object/approve/{contentId}/{transcriptId} — only valid while Review, else 400s with ERR_TRANSCRIPT_NOT_IN_REVIEW. */
   async approveTranscript(contentId: string, transcriptId: string): Promise<unknown> {
     return this.request(
       'POST',
@@ -244,8 +219,7 @@ export class ContentEditorService {
     );
   }
 
-  /** POST content/v4/enrichment/object/reject/{contentId}/{transcriptId} — only valid while
-   *  the transcript is Review; resets it to Draft so it can be regenerated/re-uploaded. */
+  /** POST content/v4/enrichment/object/reject/{contentId}/{transcriptId} — only valid while Review; resets it to Draft. */
   async rejectTranscript(contentId: string, transcriptId: string): Promise<unknown> {
     return this.request(
       'POST',
@@ -254,19 +228,10 @@ export class ContentEditorService {
     );
   }
 
-  /**
-   * GET /portal/content/v1/read/{id}?enrich=all — just the transcript list, for the
-   * Transcripts drawer. Deliberately bypasses this.request()/this.apiSlug ('/action'):
-   * v1/read only exists as a Kong compatibility alias for v3/read, and /action routes
-   * go straight to knowledge-mw (no Kong in front), so it 404s there. The portal's own
-   * ContentService hits this same v1/read+enrich=all combo successfully via its default
-   * '/portal' apiPrefix - matching that path here is what actually works.
-   */
+  /** GET /portal/content/v1/read/{id}?enrich=all — bypasses this.apiSlug and hits /portal directly, since v1/read+enrich=all only works via Kong's proxy, not direct-to-knowledge-mw /action routes. */
   async readTranscripts(contentId: string): Promise<RawTranscript[]> {
     const url = `${this.baseUrl}/portal/${this.ep.transcriptsRead}/${encodeURIComponent(contentId)}?fields=identifier&enrich=all`;
-    // no-store: transcript status changes server-side on its own (Processing → Review →
-    // Live) and via approve/reject, invisibly to the browser's HTTP cache - a cached 304
-    // here can serve a stale status long after the backend has moved on.
+    // no-store: transcript status changes server-side on its own, so a cached 304 here can serve a stale status.
     const resp = await this.fetchImpl(url, { method: 'GET', headers: this.headers, credentials: 'same-origin', cache: 'no-store' });
     let data: { result?: { content?: { enrichment?: { transcripts?: RawTranscript[] } } }; responseCode?: string; params?: { errmsg?: string } } = {};
     let parseFailed = false;
@@ -292,11 +257,7 @@ export class ContentEditorService {
     });
   }
 
-  /**
-   * PATCH content/v1/collaborator/update/{id} — set the full collaborator list.
-   * Payload is exactly {request:{content:{collaborators:[...]}}} (no versionKey),
-   * matching the generic editor. Add = include the id; remove = drop it.
-   */
+  /** PATCH content/v1/collaborator/update/{id} — sets the full collaborator list ({request:{content:{collaborators:[...]}}}, no versionKey). */
   async updateCollaborators(contentId: string, collaborators: string[]): Promise<unknown> {
     return this.request('PATCH', `${this.ep.collaboratorUpdate}/${encodeURIComponent(contentId)}`, {
       request: { content: { collaborators } },
@@ -344,16 +305,7 @@ export class ContentEditorService {
     return this.request('POST', this.ep.form, { request });
   }
 
-  /**
-   * Fetch form field definitions for a given content type + action.
-   *
-   * Mirrors the old generic editor / metadata plugin payload exactly:
-   *   {type:'content', subType, action, framework, rootOrgId, popup:true, editMode:true}
-   * Note the API expects `subType` (camelCase) and the channel as `rootOrgId`.
-   *
-   * Response shape: result.form.data.fields[] (a single section object, not an array).
-   * Sorts fields by `index` so render order matches the configured form.
-   */
+  /** Fetches form field definitions for a content type + action, mirroring the old generic editor's payload, and returns them sorted by `index`. */
   async readFormFields(
     _subtype: string,
     action: 'save' | 'review' | 'publish',
@@ -377,14 +329,7 @@ export class ContentEditorService {
     return [...fields].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
   }
 
-  /**
-   * Fetch the reject-checklist structure from the form API.
-   *
-   * Mirrors the legacy editor's `initPopup` call with `action: 'requestforchanges'`.
-   * Returns category columns (Appropriateness, Content details, Usability) and an
-   * optional "Other Issue(s)" label. The reject reasons stored in content metadata
-   * (`rejectReasons`) are matched against items in these categories.
-   */
+  /** Fetches the reject-checklist category columns and optional "Other Issue(s)" label from the form API, mirroring the legacy editor's `requestforchanges` call. */
   async readRejectChecklist(opts: {
     subType?: string;
     framework?: string;
@@ -423,12 +368,7 @@ export class ContentEditorService {
     }
   }
 
-  /**
-   * Resolve the upload content-type options from the save form's `primaryCategory`
-   * field range (falls back to a `contentType` field). Returns [] on miss/error so
-   * the caller can fall back to config/defaults. Mirrors the old generic editor,
-   * which sourced the upload dropdown from context.primaryCategories.
-   */
+  /** Resolves upload content-type options from the save form's `primaryCategory` field range, returning [] on miss/error so callers fall back to config/defaults. */
   async readPrimaryCategories(opts: { framework?: string; rootOrgId?: string } = {}): Promise<string[]> {
     try {
       const fields = await this.readFormFields('resource', 'save', opts);
@@ -442,10 +382,7 @@ export class ContentEditorService {
     }
   }
 
-  /**
-   * POST composite/v3/search — image asset browser (appicon picker).
-   * `createdBy` filters to the user's own uploads ("My Images"); omit for "All Images".
-   */
+  /** POST composite/v3/search — image asset browser; `createdBy` filters to "My Images", omit for "All Images". */
   async searchImageAssets(createdBy?: string, query?: string, offset = 0, limit = 50): Promise<AssetItem[]> {
     const filters: Record<string, unknown> = {
       mediaType: ['image'],
@@ -475,11 +412,7 @@ export class ContentEditorService {
     });
   }
 
-  /**
-   * Create an image Asset record then upload the file to it.
-   * Returns the uploaded artifact URL. Mirrors the portal's uploadAsset flow
-   * (asset/v1/create → asset/v1/upload/{id}, multipart form).
-   */
+  /** Creates an image Asset record then uploads the file to it (asset/v1/create → asset/v1/upload/{id}), returning the artifact URL. */
   async uploadImageAsset(file: File, context: EditorContext): Promise<string> {
     const created = await this.request<{ identifier?: string; node_id?: string }>(
       'POST',
@@ -520,12 +453,7 @@ export class ContentEditorService {
     return String(url);
   }
 
-  /**
-   * POST user/v1/search?fields=orgName — fetches the CONTENT_CREATOR user pool.
-   * Mirrors the generic editor's collaborator search exactly: an optional free-text
-   * `query`, the CONTENT_CREATOR role filter, and the org scope as rootOrgId[].
-   * The full pool is returned; the drawer marks which ones are already collaborators.
-   */
+  /** POST user/v1/search?fields=orgName — fetches the full CONTENT_CREATOR user pool for the org; the drawer marks which are already collaborators. */
   async searchUsers(query = '', rootOrgId?: string): Promise<Array<Record<string, unknown>>> {
     const result = await this.request<{ response?: { content?: Array<Record<string, unknown>> } }>(
       'POST',

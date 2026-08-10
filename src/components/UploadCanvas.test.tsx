@@ -82,6 +82,21 @@ describe('<UploadCanvas /> — video transcript confirm', () => {
     expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'lecture.mp4' }), false);
   });
 
+  it('resets generateTranscripts back to checked for a new video, after unchecking it for a previous one', () => {
+    const uploadFile = vi.fn();
+    const ed = openUpload({ uploadFile });
+    const { container } = render(<UploadCanvas ed={ed} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [fileOf('lecture-1.mp4', 2048, 'video/mp4')] } });
+    fireEvent.click(screen.getByRole('checkbox')); // uncheck for lecture-1
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    // Re-query: Remove unmounts the old <input> and mounts a fresh one for the next video.
+    const freshInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(freshInput, { target: { files: [fileOf('lecture-2.mp4', 2048, 'video/mp4')] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Upload' }));
+    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'lecture-2.mp4' }), true);
+  });
+
   it('clears the pending video on Remove without uploading', () => {
     const uploadFile = vi.fn();
     const ed = openUpload({ uploadFile });

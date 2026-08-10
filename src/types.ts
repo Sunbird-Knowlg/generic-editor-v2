@@ -47,11 +47,7 @@ export interface EditorConfig {
   headerLogo?: string;
   /** Legacy ekstep content-renderer preview page. Default `/content/preview/preview.html`. */
   previewUrl?: string;
-  /**
-   * Config object handed to the renderer's `initializePreview({ config })` — mirrors the old
-   * generic editor's `previewConfig`. Use it to pass endpage/endscreen options, e.g.
-   * `{ showEndpage: true, endpageConfig: {...} }`. Defaults to `{ showEndpage: true }`.
-   */
+  /** Config object handed to the renderer's `initializePreview({ config })` for endpage/endscreen options, e.g. `{ showEndpage: true }` (the default). */
   previewConfig?: Record<string, unknown>;
   telemetry?: { url?: string; batchSize?: number };
 }
@@ -141,9 +137,7 @@ export interface RawTranscript {
   generatedBy?: string;
 }
 
-/** One cue from a transcript's artifactUrl JSON (transcript.json). `id` identifies
- *  the segment's position for the update API - always present when sending an
- *  edit back, even though it may be absent on the raw read. */
+/** One cue from a transcript's artifactUrl JSON; `id` may be absent on read but must always be sent back on update. */
 export interface TranscriptSegment {
   id: number;
   text: string;

@@ -117,12 +117,7 @@ export const BookClosedIcon: React.FC<P> = ({ size = 17, className }) => (
     <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
   </svg>
 );
-/**
- * Sunbird Spark mark — the "s" letterform plus the two brand dots, cropped from
- * the portal wordmark (sunbird-spark-portal/.../sunbird-logo.svg). Two-tone
- * orange palette (#bd4527 letter, #dc7727 dots) to match the portal brand.
- * viewBox is tightened around the "s" (x≈117–251) and the dots (cx≈437).
- */
+/** Sunbird Spark mark — the "s" letterform plus brand dots, cropped from the portal wordmark in its two-tone orange palette. */
 export const SunbirdLogoIcon: React.FC<{ size?: number; className?: string }> = ({ size = 32, className }) => (
   <svg width={size} height={size} viewBox="110 245 360 300" fill="none" className={className} aria-label="Sunbird">
     <path fill="#bd4527" d="M116.83,453.56v-21.39h66.07c4.33,0,8.08-.95,11.24-2.85,3.16-1.89,5.55-4.37,7.18-7.44,1.62-3.07,2.44-6.32,2.44-9.75,0-3.25-.72-6.27-2.17-9.07-1.45-2.8-3.66-5.05-6.63-6.77-2.98-1.71-6.55-2.57-10.7-2.57h-27.89c-8.85,0-16.57-1.49-23.15-4.47-6.59-2.98-11.74-7.35-15.44-13.13-3.7-5.78-5.55-12.82-5.55-21.12,0-7.04,1.71-13.54,5.15-19.5,3.43-5.96,8.21-10.78,14.35-14.49,6.14-3.7,13.18-5.55,21.12-5.55h63.64v21.39h-61.2c-5.6,0-10.02,1.72-13.27,5.14-3.25,3.43-4.87,7.5-4.87,12.19s1.67,8.44,5.01,11.78c3.34,3.34,8.08,5.01,14.22,5.01h26.54c9.93,0,18.28,1.58,25.05,4.74,6.77,3.16,11.91,7.72,15.43,13.67,3.52,5.96,5.28,13.27,5.28,21.93,0,7.41-1.81,14.31-5.42,20.72-3.61,6.41-8.62,11.6-15.03,15.57-6.41,3.97-13.86,5.96-22.34,5.96h-69.05Z" />

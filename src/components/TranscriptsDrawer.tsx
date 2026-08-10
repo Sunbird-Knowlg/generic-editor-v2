@@ -2,19 +2,10 @@ import React, { useEffect, useState } from 'react';
 import Drawer from './Drawer';
 import type { EditorController } from '../useEditor';
 import type { RawTranscript, TranscriptSegment } from '../types';
-import { t } from '../i18n/i18n';
+import { t, tf } from '../i18n/i18n';
 import { CaptionsIcon } from '../icons';
 
-/**
- * Parses the enrichment's raw artifactUrl JSON (transcript.json, distinct from
- * captionsUrl's .vtt). Shape isn't confirmed against a real sample yet - this
- * covers the common Whisper-style `{ segments: [{ start, end, text }] }` output
- * (and a bare array) but returns null rather than guess on anything else, so
- * the UI can show an honest "couldn't read this" state instead of garbage.
- *
- * `id` isn't guaranteed on the raw read, but the update API requires one per
- * segment - falls back to the segment's position in the list.
- */
+/** Parses the artifactUrl transcript.json (Whisper-style `{segments:[...]}` or a bare array) into segments with a positional fallback `id`, returning null on any other shape. */
 function parseSegments(raw: unknown): TranscriptSegment[] | null {
   const obj = raw as Record<string, unknown> | null;
   const list = Array.isArray(raw) ? raw : Array.isArray(obj?.segments) ? (obj!.segments as unknown[]) : null;
@@ -47,14 +38,7 @@ function formatTimestamp(seconds?: number): string {
 /** The five backend-confirmed transcript statuses: Draft, Processing, Review, Live, Failed. */
 const KNOWN_STATUSES = ['Draft', 'Processing', 'Review', 'Live', 'Failed'];
 
-/**
- * The approve/reject error text already names the real current status (e.g.
- * "...must be in Review status to approve (currently Live)") - extracting it
- * directly is more reliable than a follow-up re-read, which can come back
- * stale behind a caching layer outside the browser's control (readTranscripts's
- * own `cache: 'no-store'` only affects the browser's HTTP cache, not any
- * proxy/CDN sitting in front of the backend).
- */
+/** Extracts the real status from the approve/reject error text (e.g. "currently Live"), which is more reliable than a follow-up re-read that can come back stale. */
 function parseCurrentStatusFromError(message: string): string | null {
   const found = /currently\s+(\w+)/i.exec(message)?.[1];
   return found ? KNOWN_STATUSES.find((s) => s.toLowerCase() === found.toLowerCase()) ?? null : null;
@@ -85,31 +69,20 @@ function statusLabel(lang: string, status?: string): string {
 }
 
 /** Coarse "x min/hr/day ago", falling back to '' for a missing/invalid timestamp. */
-function relativeTime(iso?: string): string {
+function relativeTime(lang: string, iso?: string): string {
   if (!iso) return '';
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return '';
   const mins = Math.round((Date.now() - then) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1) return t(lang, 'TIME_JUST_NOW');
+  if (mins < 60) return tf(lang, 'TIME_MINUTES_AGO', { n: mins });
   const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs} hr ago`;
+  if (hrs < 24) return tf(lang, 'TIME_HOURS_AGO', { n: hrs });
   const days = Math.round(hrs / 24);
-  return `${days} day${days === 1 ? '' : 's'} ago`;
+  return tf(lang, days === 1 ? 'TIME_DAY_AGO' : 'TIME_DAYS_AGO', { n: days });
 }
 
-/**
- * TranscriptsDrawer — view of content.enrichment.transcripts (fetched on open
- * via a dedicated ?enrich=all read - the main editor read never carries this,
- * to avoid paying its cost for non-video content and every other drawer).
- *
- * Approve/upload-.vtt are still UI-only placeholders: there's no confirmed
- * backend contract for them yet. "View segments" fetches each language's raw
- * transcript.json directly from blob storage (same as how captionsUrl is
- * already linked) for a timestamped view; for the source language, segments
- * can be edited and saved back via service.updateTranscript (PATCH
- * content/v4/enrichment/object/update/{contentId}/{transcriptId}).
- */
+/** TranscriptsDrawer — views/approves/rejects/edits content.enrichment.transcripts, fetched on open via a dedicated ?enrich=all read to avoid that cost elsewhere. */
 const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
   const { lang, drawer, setDrawer, content, service, showToast } = ed;
   const open = drawer === 'transcripts';
@@ -130,9 +103,7 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  /* Approve/reject a Review-status transcript. The backend applies the status
-     change asynchronously, so a successful POST doesn't mean it's live yet -
-     we re-read and only show the new status once the read actually confirms it. */
+  /* Approve/reject applies asynchronously server-side, so we re-read and only show the new status once confirmed. */
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
@@ -179,9 +150,7 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
     });
   };
 
-  /** When approve/reject itself is rejected (e.g. the backend says it's no longer
-   *  Review), re-sync activeLang from the server so the header badge/actions reflect
-   *  the real current status instead of contradicting the error message shown below it. */
+  /** Re-syncs activeLang from the server when approve/reject itself fails, so the badge reflects the real status instead of contradicting the error below it. */
   const refreshActiveLangFromServer = (transcriptId: string): Promise<void> => {
     if (!content?.identifier) return Promise.resolve();
     return service.readTranscripts(content.identifier).then((list) => {
@@ -259,17 +228,13 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
       .catch((err) => {
         const realStatus = parseCurrentStatusFromError(String((err as Error)?.message ?? ''));
         if (realStatus) {
-          // The error itself already told us the true status - trust it over a re-read
-          // that may come back stale. If it turns out to already be Live, that's not a
-          // failure at all (some other action/actor got there first) - just reflect it.
+          // Trust the error's own status over a re-read that may come back stale.
           applyKnownStatus(transcriptId, realStatus);
           if (realStatus === 'Live') { closeSegments(); return; }
           setActionError(t(lang, 'ERROR_TRANSCRIPT_ACTION_FAILED'));
           return;
         }
-        // Unparseable error - don't surface the raw errmsg, it can reference an internal
-        // status that contradicts what the badge above is (correctly) showing, which
-        // reads as self-contradictory. Re-sync from the server and give a plain retry prompt instead.
+        // Unparseable error - re-sync from the server instead of surfacing a raw errmsg that could contradict the badge.
         setActionError(t(lang, 'ERROR_TRANSCRIPT_ACTION_FAILED'));
         return refreshActiveLangFromServer(transcriptId).catch(() => {});
       })
@@ -361,12 +326,8 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
 
   const renderSegmentsView = () => {
     const tone = statusTone(activeLang!.status);
-    // Only a source-language transcript still in Review can be corrected - once
-    // it's Live it's the published caption and is no longer editable at all. Also
-    // gated on !pendingExpectedStatus: right after an approve/reject is submitted,
-    // activeLang.status is still stale ('Review') until the confirm re-read lands -
-    // without this, Edit stays clickable and a Save would hit the backend for a
-    // transcript that's actually already moved on (e.g. now Live).
+    // Editable only for a source-language transcript still in Review, and not while
+    // pendingExpectedStatus is set (activeLang.status is stale until the confirm re-read lands).
     const canShowEditControls =
       activeLang!.sourceLanguage && activeLang!.status === 'Review' && !pendingExpectedStatus &&
       !segmentsLoading && !segmentsError && !!segments;
@@ -464,8 +425,6 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
 
   const renderLanguagesView = () => (
     <>
-      <p className="ce-transcripts-subtitle">{t(lang, 'TRANSCRIPTS_SUBTITLE')}</p>
-
       {loading ? (
         <div className="ce-center" style={{ padding: 40 }}>
           <div className="ce-spinner ce-spinner--sm" />
@@ -487,7 +446,10 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
         </div>
       ) : (
         <>
-          <p className="ce-transcripts-note">{t(lang, 'STATUS_SYNC_NOTE')}</p>
+          {!transcripts.every((tr) => tr.status === 'Live') && (
+            // Nothing left that could still be approved/rejected once everything is Live.
+            <p className="ce-transcripts-note">{t(lang, 'STATUS_SYNC_NOTE')}</p>
+          )}
           {transcripts.every((tr) => tr.sourceLanguage) && (
             // No translated languages exist yet - set the expectation up front instead
             // of leaving the source-only list looking like translation was skipped.
@@ -503,7 +465,7 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
               // a caption glyph reads as "still figuring this out", unlike a literal "??".
               const code = (tr.languageCode || tr.language || '').slice(0, 2).toUpperCase();
               const generatedLabel = tr.sourceLanguage ? t(lang, 'TRANSCRIPT_AUTO_GENERATED') : t(lang, 'TRANSCRIPT_TRANSLATED');
-              const when = relativeTime(tr.generatedOn);
+              const when = relativeTime(lang, tr.generatedOn);
               return (
                 <div key={tr.identifier ?? tr.code ?? tr.languageCode} className={`ce-transcript-card ce-transcript-card--${tone}`}>
                   <div className="ce-transcript-card-head">

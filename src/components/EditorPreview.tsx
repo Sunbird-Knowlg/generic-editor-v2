@@ -14,12 +14,7 @@ interface PlayerTranscript {
   sourceLanguage?: boolean;
 }
 
-/**
- * Maps enrichment.transcripts (raw) into the shape sunbird-video-player expects -
- * mirrors the portal's ContentService.contentRead mapping exactly, since the legacy
- * preview iframe's video sub-player is the same component. artifactUrl here must be
- * the VTT (captionsUrl), not the raw transcript.json.
- */
+/** Maps raw enrichment.transcripts into the shape sunbird-video-player expects, mirroring the portal's ContentService mapping (artifactUrl here is the VTT, not transcript.json). */
 function mapRawTranscripts(raw: RawTranscript[]): PlayerTranscript[] {
   return raw
     .filter((e): e is RawTranscript & { captionsUrl: string } =>
@@ -34,15 +29,7 @@ function mapRawTranscripts(raw: RawTranscript[]): PlayerTranscript[] {
     }));
 }
 
-/**
- * Preview via the legacy ekstep content renderer — the same mechanism the old
- * generic editor used (org.ekstep.genericeditorpreview). One renderer handles all
- * mimeTypes (video/pdf/epub/ecml/html/scorm/h5p/youtube/url) through its coreplugins.
- *
- * Loads `content/preview/preview.html?webview=true` in an iframe (same-origin via the
- * host proxy), then calls its global `initializePreview()` with the content id +
- * metadata. No player-v2 dependency, no client-side unzip.
- */
+/** Preview via the legacy ekstep content renderer (all mimeTypes through its coreplugins), loaded in an iframe and driven via its global `initializePreview()`. */
 const RendererPreview: React.FC<{
   content: ContentData; context: EditorContext; previewUrl: string; previewConfig: Record<string, unknown>;
 }> = ({ content, context, previewUrl, previewConfig }) => {
@@ -99,10 +86,7 @@ const EditorPreview: React.FC<{ ed: EditorController; context: EditorContext }> 
 
   if (!content) return null;
 
-  // Merging transcripts changes content's identity without changing identifier/artifactUrl,
-  // so the iframe key below also folds in transcripts.length - forcing exactly one remount
-  // (+ one re-init) once they arrive, instead of silently never surfacing them. Acceptable
-  // here (unlike a live learner player) since this is the creator's own edit-time preview.
+  // The iframe key below folds in transcripts.length to force one remount once they arrive, since merging them doesn't change identifier/artifactUrl.
   const previewMetadata = transcripts.length ? { ...content, transcripts } : content;
 
   return (

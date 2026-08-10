@@ -1,15 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap');
 
-/*
- * ============================================================
- * SUNBIRD CONTENT EDITOR v2 — THEME SYSTEM
- * ============================================================
- * 6 seed variables drive every accent colour. Default = blue.
- * When embedded in the portal, ThemeProvider sets these inline on
- * documentElement and overrides the defaults below (same cascade
- * trick player-v2 uses). Neutral slate tokens are theme-invariant.
- * ============================================================
- */
+/* Theme system: 6 seed variables drive every accent colour (default blue), overridable inline by the portal's ThemeProvider; slate tokens are theme-invariant. */
 
 :root {
   /* ---- 6 seed variables (default = Sunbird Spark "blue") ---- */
@@ -407,9 +398,7 @@
 }
 
 .ce-select {
-  /* Match the multi-select control (.ce-multi-control) so single/multi fields line up.
-     Size via symmetric vertical padding (not a fixed height) with a normal line-height
-     so an appearance:none <select> centres its value and never clips descenders. */
+  /* Matches .ce-multi-control's sizing via symmetric padding so an appearance:none <select> centres its value without clipping descenders. */
   line-height: 1.4;
   font-size: 13px;
   padding: 10px 40px 10px 14px;
@@ -937,9 +926,7 @@
   border-width: 3px;
 }
 
-/* In-button loaders must always be tiny, regardless of any size modifier or
-   stale/cached CSS. Higher specificity than .ce-spinner / .ce-spinner--xs so it
-   always wins inside buttons. */
+/* Higher specificity than .ce-spinner/.ce-spinner--xs so in-button loaders always stay tiny regardless of any size modifier. */
 .ce-btn .ce-spinner,
 .ce-icon-btn .ce-spinner {
   width: 14px;
@@ -1081,9 +1068,7 @@
   border-radius: 18px;
   box-shadow: 0 4px 6px rgba(15, 23, 42, 0.04), 0 12px 36px rgba(15, 23, 42, 0.08);
   overflow: hidden;
-  /* Centre via auto margins, not the parent's align-items — a sibling package
-     forces `.ce-main { align-items: normal !important }` which specificity can't
-     beat; auto margins are immune to it. */
+  /* Auto margins, not the parent's align-items - a sibling package's !important on .ce-main beats specificity but not auto margins. */
   margin: 18px auto 0;
 }
 
@@ -1183,9 +1168,7 @@
   overflow: hidden;
 }
 
-/* dir lives on the `.ce-editor` root itself, so this must be `&[dir='rtl']`
- * (root-with-attr), not `[dir='rtl'] …` (a descendant) — the CSS is wrapped
- * under `.ce-editor` at build, and a descendant selector would never match. */
+/* Must be `&[dir='rtl']` (root-with-attr), not a descendant selector, since `dir` lives on the `.ce-editor` root this is wrapped under. */
 &[dir='rtl'] .ce-drawer {
   transform: translateX(-100%);
   box-shadow: 6px 0 32px rgba(15, 23, 42, 0.11);
@@ -2643,12 +2626,6 @@
 }
 
 /* ============================ TRANSCRIPTS DRAWER ============================ */
-.ce-transcripts-subtitle {
-  font-size: 12.5px;
-  color: var(--ce-slate-500);
-  margin: 0 0 16px 0;
-}
-
 .ce-transcripts-note {
   font-size: 12px;
   color: #1d4ed8;
@@ -2877,14 +2854,7 @@
   border-color: var(--ce-primary);
 }
 
-/* ============================================================
- * FOREIGN GLOBAL-RESET GUARD
- * A sibling package (questionset editor) ships an element-level reset that leaks
- * document-wide: `p,li,figcaption { max-inline-size: 70ch; text-wrap: pretty }`
- * and `h1..h6 { text-wrap: balance }`. Those cap our paragraphs at ~70ch and
- * balance short lines mid-sentence. Re-assert normal flow for editor text
- * (specificity 0,1,1 > their 0,0,1 — no !important needed).
- * ============================================================ */
+/* Foreign global-reset guard: re-asserts normal text flow to override a sibling package's document-wide element reset (max-inline-size/text-wrap) via higher specificity. */
 .ce-editor p,
 .ce-editor li,
 .ce-editor figcaption {

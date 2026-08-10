@@ -82,7 +82,12 @@ const UploadCanvas: React.FC<{ ed: EditorController }> = ({ ed }) => {
     }
     setUploadUrl('');
     setPendingFile(f);
-    if (isVideoFile(f)) return;
+    if (isVideoFile(f)) {
+      // Default back to checked for every new video staged - otherwise an earlier
+      // uncheck silently carries over to the next video without the user noticing.
+      setGenerateTranscripts(true);
+      return;
+    }
     uploadFile(f);
   };
 

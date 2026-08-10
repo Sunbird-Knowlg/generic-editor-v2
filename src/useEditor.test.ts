@@ -61,6 +61,52 @@ function stubUploadPipeline() {
   }) as unknown as typeof fetch;
 }
 
+describe('useEditor — hasTranscripts polling', () => {
+  it('polls readTranscripts periodically until transcripts appear, then stops polling', async () => {
+    vi.useFakeTimers();
+    try {
+      const readTranscripts = vi.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ identifier: 't1', language: 'English', status: 'Live' }]);
+      const service = svc({ readTranscripts });
+      (service.readContent as ReturnType<typeof vi.fn>).mockResolvedValue(videoContent());
+      const { result } = renderHook(() => useEditor({ context: mockContext, contentId: 'do_video_1', service }));
+
+      await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+      expect(result.current.hasTranscripts).toBe(false); // first check: not ready yet
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+      expect(result.current.hasTranscripts).toBe(false); // still not ready on the first poll
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+      expect(result.current.hasTranscripts).toBe(true); // second poll: now it exists
+
+      const callsOnceConfirmed = readTranscripts.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+      // No further reads once confirmed - polling stops instead of running forever.
+      expect(readTranscripts.mock.calls.length).toBe(callsOnceConfirmed);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not poll for non-video content (negative)', async () => {
+    vi.useFakeTimers();
+    try {
+      const readTranscripts = vi.fn().mockResolvedValue([]);
+      const service = svc({ readTranscripts });
+      (service.readContent as ReturnType<typeof vi.fn>).mockResolvedValue(videoContent({ mimeType: 'application/pdf' }));
+      renderHook(() => useEditor({ context: mockContext, contentId: 'do_video_1', service }));
+      await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+      expect(readTranscripts).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('useEditor — transcript generation on upload', () => {
   it('calls createTranscript right after a successful video upload when the checkbox was checked', async () => {
     const service = svc();

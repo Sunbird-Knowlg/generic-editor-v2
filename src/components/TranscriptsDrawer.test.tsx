@@ -73,6 +73,15 @@ describe('<TranscriptsDrawer />', () => {
     expect(await screen.findByText(/take a few minutes to fully sync/)).toBeInTheDocument();
   });
 
+  it('does not show the sync note once every language is Live - nothing left to approve/reject (negative)', async () => {
+    const allLive = TRANSCRIPTS.map((tr) => ({ ...tr, status: 'Live' }));
+    const service = mockService({ readTranscripts: vi.fn().mockResolvedValue(allLive) });
+    const ed = makeEd({ drawer: 'transcripts', service });
+    render(<TranscriptsDrawer ed={ed} />);
+    await screen.findByText('English');
+    expect(screen.queryByText(/take a few minutes to fully sync/)).not.toBeInTheDocument();
+  });
+
   it('does not show the sync note in the empty state - nothing has happened yet to sync (negative)', async () => {
     const service = mockService({ readTranscripts: vi.fn().mockResolvedValue([]) });
     const ed = makeEd({ drawer: 'transcripts', service });
@@ -225,7 +234,7 @@ describe('<TranscriptsDrawer />', () => {
       await screen.findByText('Namaste.');
       fireEvent.click(screen.getByRole('button', { name: 'Approve Transcript' }));
       expect(await screen.findByText(/Almost there/)).toBeInTheDocument();
-      expect(screen.getByText('Updating...')).toBeInTheDocument(); // not falsely shown as Live...
+      expect(screen.getByText('Updating…')).toBeInTheDocument(); // not falsely shown as Live...
       expect(screen.queryByText('Needs review')).not.toBeInTheDocument(); // ...nor left showing "Needs review" as if nothing happened
       expect(screen.getByText('Namaste.')).toBeInTheDocument(); // stayed on the language, didn't close
       vi.unstubAllGlobals();
@@ -244,9 +253,7 @@ describe('<TranscriptsDrawer />', () => {
       await screen.findByText('Namaste.');
       fireEvent.click(screen.getByRole('button', { name: 'Approve Transcript' }));
       await screen.findByText(/Almost there/);
-      // Re-clicking Approve here would hit the backend again and fail with
-      // ERR_TRANSCRIPT_NOT_IN_REVIEW since the first approve already landed - so the
-      // button must be gone, leaving only "Check again" as the actionable option.
+      // Re-clicking Approve now would fail with ERR_TRANSCRIPT_NOT_IN_REVIEW, so it must be gone.
       expect(screen.queryByRole('button', { name: 'Approve Transcript' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument();
@@ -447,9 +454,7 @@ describe('<TranscriptsDrawer />', () => {
     });
 
     describe('editing (source language, review status only)', () => {
-      // Editing is only allowed for a source-language transcript with status
-      // literally 'Review'. English is Live in the base fixture, so these tests
-      // use a copy with its status set to Review.
+      // English is Live in the base fixture, so use a copy with its status set to Review.
       const SOURCE_IN_REVIEW = TRANSCRIPTS.map((tr) => (tr.language === 'English' ? { ...tr, status: 'Review' } : tr));
 
       it('shows a Modify button on the source-language card when it is in review, that opens segments straight into edit mode', async () => {

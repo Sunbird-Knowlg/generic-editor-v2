@@ -45,10 +45,8 @@ export function mockService(over: Record<string, unknown> = {}): ContentEditorSe
   } as unknown as ContentEditorService;
 }
 
-/**
- * Build an EditorController stub. Every action is a vi.fn(); pass `over` to
- * override any state or action for the scenario under test.
- */
+
+/** Build an EditorController stub with every action as a vi.fn(); pass `over` to override state/actions for the scenario under test. */
 export function makeEd(over: Partial<EditorController> = {}): EditorController {
   const ed = {
     // state

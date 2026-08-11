@@ -36,14 +36,17 @@ export function mockService(over: Record<string, unknown> = {}): ContentEditorSe
     readContent: vi.fn().mockResolvedValue(mockContent),
     createLock: vi.fn().mockResolvedValue({}),
     retireLock: vi.fn().mockResolvedValue(undefined),
+    readTranscripts: vi.fn().mockResolvedValue([]),
+    createTranscript: vi.fn().mockResolvedValue({ transcriptId: 't1' }),
+    updateTranscript: vi.fn().mockResolvedValue({}),
+    approveTranscript: vi.fn().mockResolvedValue({}),
+    rejectTranscript: vi.fn().mockResolvedValue({}),
     ...over,
   } as unknown as ContentEditorService;
 }
 
-/**
- * Build an EditorController stub. Every action is a vi.fn(); pass `over` to
- * override any state or action for the scenario under test.
- */
+
+/** Build an EditorController stub with every action as a vi.fn(); pass `over` to override state/actions for the scenario under test. */
 export function makeEd(over: Partial<EditorController> = {}): EditorController {
   const ed = {
     // state
@@ -75,6 +78,9 @@ export function makeEd(over: Partial<EditorController> = {}): EditorController {
     assetPicker: null,
     reviewSubmitMode: false,
     hasReviewComments: false,
+    hasTranscripts: false,
+    transcripts: [],
+    transcriptsChecked: true,
     // setters
     setDrawer: vi.fn(),
     setContentType: vi.fn(),

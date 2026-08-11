@@ -1,17 +1,4 @@
-/**
- * ContentEditor — the editor root component.
- *
- *   import { ContentEditor } from '@project-sunbird/generic-editor-v2';
- *   import '@project-sunbird/generic-editor-v2/dist/sunbird-generic-editor.css';
- *
- *   <ContentEditor
- *     context={{ uid, sid, did, channel, pdata, user, framework }}
- *     contentId="do_123"            // omit for a brand-new upload
- *     language="en"
- *     onClose={() => navigate('/workspace')}
- *     onTelemetryEvent={(e) => post(e)}
- *   />
- */
+/** ContentEditor — the editor root component; render with a `context`, optional `contentId` (omit for a new upload), and its `onClose`/`onTelemetryEvent` callbacks. */
 import React from 'react';
 import './editor.scss';
 import { useEditor, type UseEditorOptions } from './useEditor';
@@ -23,6 +10,7 @@ import MetadataDrawer from './components/MetadataDrawer';
 import CollaboratorDrawer from './components/CollaboratorDrawer';
 import ReviewDrawer from './components/ReviewDrawer';
 import ReviewCommentsDrawer from './components/ReviewCommentsDrawer';
+import TranscriptsDrawer from './components/TranscriptsDrawer';
 import AssetPickerModal from './components/AssetPickerModal';
 import Toast from './components/Toast';
 import { t } from './i18n/i18n';
@@ -56,6 +44,7 @@ const ContentEditor: React.FC<ContentEditorProps> = (props) => {
       <CollaboratorDrawer ed={ed} />
       <ReviewDrawer ed={ed} />
       <ReviewCommentsDrawer ed={ed} />
+      <TranscriptsDrawer ed={ed} />
       <AssetPickerModal ed={ed} />
 
       <Toast toast={ed.toast} />

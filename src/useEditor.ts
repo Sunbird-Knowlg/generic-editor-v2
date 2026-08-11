@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ContentData, DrawerKind, EditorConfig, EditorContext, EditorEventPayload,
-  EditorMode, EditorView, UploadProgress,
+  EditorMode, EditorView, RawTranscript, UploadProgress,
 } from './types';
 import { ContentEditorService } from './services/ContentEditorService';
 import { UploadService, detectFileMime, detectUrlMime } from './services/UploadService';
@@ -33,6 +33,10 @@ export interface ToastState {
 }
 
 const REVIEWER_ROLES = ['CONTENT_REVIEWER', 'BOOK_REVIEWER'];
+
+const TRANSCRIPT_POLL_MS = 20000;
+/** ~5 minutes of active (non-hidden) polling - generation is expected to finish well within this. */
+const TRANSCRIPT_POLL_MAX_ATTEMPTS = 15;
 
 function resolveMode(status: string | undefined, roles: string[] = []): EditorMode {
   const s = (status || STATUS.DRAFT).toLowerCase().trim();
@@ -658,25 +662,42 @@ export function useEditor(opts: UseEditorOptions) {
   /** True when content was rejected and has reviewer suggestions to show. */
   const hasReviewComments = !!(content?.rejectReasons?.length || content?.rejectComment);
 
-  /* ---- Transcripts availability: gates the header's "View transcript" button, polling readTranscripts until entries actually exist since generation is async and can take a while. */
-  const [hasTranscripts, setHasTranscripts] = useState(false);
+  /* ---- Transcripts: single fetch owner for the raw list (EditorPreview/TranscriptsDrawer
+     read it from here instead of each independently re-fetching the same slow ?enrich=all
+     payload). Gates the header's "View transcript" button and feeds the preview's live
+     captions. Polls every 20s until transcripts exist since generation is async - capped
+     at TRANSCRIPT_POLL_MAX_ATTEMPTS so a video that never gets transcripts (box left
+     unchecked, or generation failed) doesn't poll for the rest of the session, and skips
+     the fetch (without stopping the poll) while the tab is hidden. */
+  const [transcripts, setTranscripts] = useState<RawTranscript[]>([]);
+  const [transcriptsChecked, setTranscriptsChecked] = useState(false);
+  const hasTranscripts = transcripts.length > 0;
   useEffect(() => {
-    setHasTranscripts(false);
-    if (!content?.identifier || !isVideoMimeType(content.mimeType)) return;
+    setTranscripts([]);
+    setTranscriptsChecked(false);
+    if (!content?.identifier || !isVideoMimeType(content.mimeType)) { setTranscriptsChecked(true); return; }
     const id = content.identifier;
     let found = false;
+    let attempts = 0;
     const check = () => {
       service
         .readTranscripts(id)
         .then((list) => {
           if (!mountedRef.current || found) return;
           found = list.length > 0;
-          setHasTranscripts(found);
+          setTranscripts(list);
         })
-        .catch(() => { if (mountedRef.current && !found) setHasTranscripts(false); });
+        .catch(() => { if (mountedRef.current && !found) setTranscripts([]); })
+        .finally(() => { if (mountedRef.current) setTranscriptsChecked(true); });
     };
     check();
-    const interval = setInterval(() => { if (found) clearInterval(interval); else check(); }, 20000);
+    const interval = setInterval(() => {
+      if (found) { clearInterval(interval); return; }
+      attempts += 1;
+      if (attempts > TRANSCRIPT_POLL_MAX_ATTEMPTS) { clearInterval(interval); return; }
+      if (typeof document !== 'undefined' && document.hidden) return;
+      check();
+    }, TRANSCRIPT_POLL_MS);
     return () => clearInterval(interval);
   }, [content?.identifier, content?.mimeType, service]);
 
@@ -685,7 +706,8 @@ export function useEditor(opts: UseEditorOptions) {
     content, view, drawer, toast, progress, contentType, uploadUrl, urlError, busy, busyAction, mode, lang, categories,
     maxMB, largeUpload, headerLogo, previewUrl, previewConfig, framework: context.framework,
     userId: context.user?.id, rootOrgId: context.user?.rootOrgId, userRoles: context.user?.roles ?? [],
-    reviewErrors, uploadSuccess, sessionExpired, assetPicker, reviewSubmitMode, hasReviewComments, hasTranscripts,
+    reviewErrors, uploadSuccess, sessionExpired, assetPicker, reviewSubmitMode, hasReviewComments,
+    hasTranscripts, transcripts, transcriptsChecked,
     // setters
     setDrawer: openDrawer, setContentType, setUploadUrl, setUrlError, showToast, setReviewErrors, setReviewSubmitMode,
     dismissSessionExpiry, openAssetPicker, closeAssetPicker,

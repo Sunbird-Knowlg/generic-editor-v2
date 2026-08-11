@@ -38,6 +38,21 @@ describe('ContentEditorService.readContent caching', () => {
     }
   });
 
+  it('sends Cache-Control: no-cache so an intermediary gateway cache (e.g. Kong proxy-cache) does not serve a pre-mutation response', async () => {
+    const savedFetch = globalThis.fetch;
+    let capturedInit: RequestInit | undefined;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      capturedInit = init;
+      return { ok: true, json: async () => ({ responseCode: 'OK', result: { content: { identifier: 'do_1', name: 'X' } } }) };
+    }) as unknown as typeof fetch;
+    try {
+      await new ContentEditorService().readContent('do_1');
+      expect((capturedInit?.headers as Record<string, string>)['Cache-Control']).toBe('no-cache');
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
   it('leaves other GETs on default browser caching (negative)', async () => {
     const savedFetch = globalThis.fetch;
     let capturedInit: RequestInit | undefined;
@@ -119,6 +134,23 @@ describe('ContentEditorService.updateTranscript', () => {
       expect(capturedUrl).toBe('/action/content/v4/enrichment/object/update/do_2146/do_9999');
       expect(capturedInit?.method).toBe('PATCH');
       expect(capturedInit?.body).toBe(JSON.stringify({ request: { object: { objectType: 'Transcript', segments } } }));
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('accepts arbitrary segment fields unmodified (not typed to {id,text,start,end}) - so a caller can round-trip fields it does not itself model', async () => {
+    const savedFetch = globalThis.fetch;
+    let capturedInit: RequestInit | undefined;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      capturedInit = init;
+      return { ok: true, json: async () => ({ responseCode: 'OK', result: {} }) };
+    }) as unknown as typeof fetch;
+    try {
+      const svc = new ContentEditorService();
+      const segments = [{ id: 0, text: 'Corrected', seek: 400, tokens: [1, 2, 3], avg_logprob: -0.2 }];
+      await svc.updateTranscript('do_2146', 'do_9999', segments);
+      expect(JSON.parse(String(capturedInit?.body))).toEqual({ request: { object: { objectType: 'Transcript', segments } } });
     } finally {
       globalThis.fetch = savedFetch;
     }
@@ -241,6 +273,38 @@ describe('ContentEditorService.readTranscripts', () => {
     try {
       const svc = new ContentEditorService();
       await expect(svc.readTranscripts('do_1')).rejects.toThrow('Content not found');
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('respects a custom portalSlug from config instead of the hardcoded /portal (fix for a host with a different gateway path)', async () => {
+    const savedFetch = globalThis.fetch;
+    let capturedUrl = '';
+    globalThis.fetch = (async (url: string) => {
+      capturedUrl = url;
+      return { ok: true, json: async () => ({ responseCode: 'OK', result: { content: {} } }) };
+    }) as unknown as typeof fetch;
+    try {
+      const svc = new ContentEditorService({ portalSlug: '/gateway-portal' });
+      await svc.readTranscripts('do_1');
+      expect(capturedUrl).toBe('/gateway-portal/content/v1/read/do_1?fields=identifier&enrich=all');
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('sends Cache-Control: no-cache so Kong proxy-cache does not serve a stale pre-approve/reject status', async () => {
+    const savedFetch = globalThis.fetch;
+    let capturedInit: RequestInit | undefined;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      capturedInit = init;
+      return { ok: true, json: async () => ({ responseCode: 'OK', result: { content: {} } }) };
+    }) as unknown as typeof fetch;
+    try {
+      const svc = new ContentEditorService();
+      await svc.readTranscripts('do_1');
+      expect((capturedInit?.headers as Record<string, string>)['Cache-Control']).toBe('no-cache');
     } finally {
       globalThis.fetch = savedFetch;
     }

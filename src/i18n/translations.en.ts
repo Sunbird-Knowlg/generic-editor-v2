@@ -74,7 +74,7 @@ export const TRANSLATIONS_EN: Record<string, string> = {
   TIME_HOURS_AGO: '{n} hr ago',
   TIME_DAY_AGO: '{n} day ago',
   TIME_DAYS_AGO: '{n} days ago',
-  TRANSLATIONS_PENDING_NOTE: 'Translations for other languages will appear once the source language transcript is ready — this can take a few minutes.',
+  TRANSLATIONS_PENDING_NOTE: 'Translations for other languages will appear once the source language transcript is ready. This can take a few minutes.',
   STATUS_SYNC_NOTE: 'Status changes like approve or reject can take a few minutes to fully sync everywhere. If a refresh shows an older status, check back shortly.',
   STATUS_LIVE: 'Live',
   STATUS_NEEDS_REVIEW: 'Needs review',

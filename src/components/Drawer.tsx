@@ -10,11 +10,13 @@ interface DrawerProps {
   children: React.ReactNode;
   /** Localized label for the close button (falls back to English). */
   closeLabel?: string;
+  /** Extra class on the root, e.g. for a drawer-specific scoped theme override. */
+  className?: string;
 }
 
 /** Slide-in drawer (right in LTR, left in RTL). Always mounted so the transform transition runs. */
-const Drawer: React.FC<DrawerProps> = ({ open, onClose, titleIcon, title, footer, children, closeLabel = 'Close' }) => (
-  <div className="ce-drawer" data-open={open} aria-hidden={!open}>
+const Drawer: React.FC<DrawerProps> = ({ open, onClose, titleIcon, title, footer, children, closeLabel = 'Close', className }) => (
+  <div className={`ce-drawer${className ? ` ${className}` : ''}`} data-open={open} aria-hidden={!open}>
     <div className="ce-drawer-head">
       <div className="ce-drawer-title-row">
         <span className="ce-drawer-title-ic">{titleIcon}</span>

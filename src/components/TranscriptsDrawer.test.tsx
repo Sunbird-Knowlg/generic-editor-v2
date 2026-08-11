@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import TranscriptsDrawer from './TranscriptsDrawer';
 import { makeEd, mockService, mockContent } from '../test/mockEd';
@@ -240,6 +240,27 @@ describe('<TranscriptsDrawer />', () => {
       vi.unstubAllGlobals();
     });
 
+    it('treats a failed confirmation re-read as "still processing", not as an approve failure', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ segments: [{ text: 'Namaste.' }] }) }));
+      const approveTranscript = vi.fn().mockResolvedValue({});
+      // The approve write itself succeeds; only the follow-up confirm re-read hits a network blip.
+      const readTranscripts = vi.fn()
+        .mockResolvedValueOnce(TRANSCRIPTS) // initial load
+        .mockRejectedValueOnce(new Error('network blip')); // confirm re-read after approve
+      const service = mockService({ readTranscripts, approveTranscript });
+      const ed = makeEd({ drawer: 'transcripts', service });
+      render(<TranscriptsDrawer ed={ed} />);
+      await screen.findByText('Hindi');
+      fireEvent.click(screen.getByRole('button', { name: 'Review' }));
+      await screen.findByText('Namaste.');
+      fireEvent.click(screen.getByRole('button', { name: 'Approve Transcript' }));
+      await waitFor(() => expect(approveTranscript).toHaveBeenCalledWith('do_1', 't_hi'));
+      expect(await screen.findByText(/Almost there/)).toBeInTheDocument();
+      expect(screen.queryByText("Couldn't complete this action. Please try again in a moment.")).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument();
+      vi.unstubAllGlobals();
+    });
+
     it('hides Approve/Reject while a just-submitted approve awaits confirmation - prevents a second, guaranteed-to-fail submit (negative)', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ segments: [{ text: 'Namaste.' }] }) }));
       const approveTranscript = vi.fn().mockResolvedValue({});
@@ -280,6 +301,28 @@ describe('<TranscriptsDrawer />', () => {
       await waitFor(() => expect(readTranscripts).toHaveBeenCalledTimes(3));
       await screen.findByText('Hindi');
       await waitFor(() => expect(screen.getAllByText('Live')).toHaveLength(2));
+      vi.unstubAllGlobals();
+    });
+
+    it('surfaces an error (not an unhandled rejection) when "Check again" itself fails (negative)', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ segments: [{ text: 'Namaste.' }] }) }));
+      const approveTranscript = vi.fn().mockResolvedValue({});
+      const readTranscripts = vi.fn()
+        .mockResolvedValueOnce(TRANSCRIPTS)
+        .mockResolvedValueOnce(TRANSCRIPTS) // confirm right after approve: still Review
+        .mockRejectedValueOnce(new Error('network blip')); // "Check again" click hits a network error
+      const service = mockService({ readTranscripts, approveTranscript });
+      const ed = makeEd({ drawer: 'transcripts', service });
+      render(<TranscriptsDrawer ed={ed} />);
+      await screen.findByText('Hindi');
+      fireEvent.click(screen.getByRole('button', { name: 'Review' }));
+      await screen.findByText('Namaste.');
+      fireEvent.click(screen.getByRole('button', { name: 'Approve Transcript' }));
+      await screen.findByText(/Almost there/);
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+      expect(await screen.findByText("Couldn't complete this action. Please try again in a moment.")).toBeInTheDocument();
+      // Still recoverable - the retry action itself must survive its own failure.
+      expect(screen.getByRole('button', { name: 'Check again' })).not.toBeDisabled();
       vi.unstubAllGlobals();
     });
 
@@ -444,6 +487,24 @@ describe('<TranscriptsDrawer />', () => {
       expect(screen.queryByText('Hi.')).not.toBeInTheDocument();
     });
 
+    it('re-fetches the list when navigating back, so a status that changed while viewing segments isn\'t left stale', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ segments: [{ text: 'Hi.' }] }) }));
+      const readTranscripts = vi.fn()
+        .mockResolvedValueOnce(TRANSCRIPTS)
+        .mockResolvedValueOnce(TRANSCRIPTS.map((tr) => (tr.language === 'Hindi' ? { ...tr, status: 'Live' } : tr)));
+      const service = mockService({ readTranscripts });
+      const ed = makeEd({ drawer: 'transcripts', service });
+      render(<TranscriptsDrawer ed={ed} />);
+      await screen.findByText('English');
+      fireEvent.click(screen.getByRole('button', { name: 'View segments' }));
+      await screen.findByText('Hi.');
+      fireEvent.click(screen.getByRole('button', { name: /Back to languages/ }));
+      await waitFor(() => expect(readTranscripts).toHaveBeenCalledTimes(2));
+      // Hindi (Review in the first fetch) now reflects the second fetch's Live status.
+      await screen.findByText('English');
+      expect(await waitFor(() => screen.getAllByText('Live'))).toHaveLength(2);
+    });
+
     it('does not offer "View segments" for a language with no artifactUrl (negative)', async () => {
       const service = mockService({ readTranscripts: vi.fn().mockResolvedValue(TRANSCRIPTS) });
       const ed = makeEd({ drawer: 'transcripts', service });
@@ -570,6 +631,64 @@ describe('<TranscriptsDrawer />', () => {
           { id: 0, start: 0, end: 2.5, text: 'Corrected text here' },
           { id: 1, text: 'Bye.', start: undefined, end: undefined },
         ]));
+      });
+
+      it('preserves fields the parser does not model (e.g. Whisper seek/tokens) through an edit and save, changing only the edited text', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          json: async () => ({
+            segments: [{ id: 0, start: 0, end: 2.5, text: 'Hello there.', seek: 400, tokens: [1, 2, 3], avg_logprob: -0.2 }],
+          }),
+        }));
+        const updateTranscript = vi.fn().mockResolvedValue({});
+        const service = mockService({ readTranscripts: vi.fn().mockResolvedValue(SOURCE_IN_REVIEW), updateTranscript });
+        const ed = makeEd({ drawer: 'transcripts', service });
+        render(<TranscriptsDrawer ed={ed} />);
+        await screen.findByText('English');
+        fireEvent.click(screen.getAllByRole('button', { name: 'Review' })[0]);
+        await screen.findByText('Hello there.');
+        fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Corrected text here' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(updateTranscript).toHaveBeenCalledWith('do_1', 't_en', [
+          { id: 0, start: 0, end: 2.5, text: 'Corrected text here', seek: 400, tokens: [1, 2, 3], avg_logprob: -0.2 },
+        ]));
+      });
+
+      it('a slow fetch for a language the user has since left cannot land its segments onto the one now open (openSegments race guard)', async () => {
+        let resolveEnglish: (v: unknown) => void = () => {};
+        const englishPromise = new Promise((resolve) => { resolveEnglish = resolve; });
+        const fetchMock = vi.fn((url: string) => {
+          if (url === 'https://x/en.json') return englishPromise;
+          if (url === 'https://x/hi.json') return Promise.resolve({ json: async () => ({ segments: [{ text: 'Namaste.' }] }) });
+          return Promise.reject(new Error(`unexpected url: ${url}`));
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        const service = mockService({ readTranscripts: vi.fn().mockResolvedValue(SOURCE_IN_REVIEW) });
+        const ed = makeEd({ drawer: 'transcripts', service });
+        render(<TranscriptsDrawer ed={ed} />);
+        await screen.findByText('English');
+
+        // Start English's (slow) fetch, then leave before it resolves.
+        fireEvent.click(screen.getAllByRole('button', { name: 'Review' })[0]);
+        await screen.findByText('English', { selector: '.ce-transcript-segments-title' });
+        fireEvent.click(screen.getByRole('button', { name: /Back to languages/ }));
+        // Back to languages now re-fetches the list - wait for it to land before continuing.
+        await screen.findAllByRole('button', { name: 'Review' });
+
+        // Open Hindi - its (fast) fetch resolves first.
+        fireEvent.click(screen.getAllByRole('button', { name: 'Review' })[1]);
+        await screen.findByText('Namaste.');
+
+        // English's slow fetch finally resolves - it must not overwrite Hindi's segments.
+        await act(async () => {
+          resolveEnglish({ json: async () => ({ segments: [{ text: 'English text that must not appear.' }] }) });
+          await new Promise((r) => setTimeout(r, 0));
+          await new Promise((r) => setTimeout(r, 0));
+        });
+        expect(screen.queryByText('English text that must not appear.')).not.toBeInTheDocument();
+        expect(screen.getByText('Namaste.')).toBeInTheDocument();
+        expect(screen.getByText('Hindi', { selector: '.ce-transcript-segments-title' })).toBeInTheDocument();
+        vi.unstubAllGlobals();
       });
 
       it('exits edit mode and shows the saved text after a successful save', async () => {

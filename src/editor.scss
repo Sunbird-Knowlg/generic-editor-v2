@@ -2626,6 +2626,19 @@
 }
 
 /* ============================ TRANSCRIPTS DRAWER ============================ */
+/* Scoped to this drawer only - redefining --ce-font here (rather than at .ce-editor)
+   means only the transcripts page follows the portal's live font choice, leaving
+   every other drawer/component on the fixed default. --ce-btn/--ce-icon-btn are
+   shared classes reused app-wide, so their radius is overridden here rather than
+   at their own definition to keep that reuse untouched elsewhere. */
+.ce-drawer--transcripts {
+  --ce-font: var(--app-font-family, 'Rubik'), system-ui, -apple-system, sans-serif;
+}
+.ce-drawer--transcripts .ce-btn,
+.ce-drawer--transcripts .ce-icon-btn {
+  border-radius: var(--r-sm, 9px);
+}
+
 .ce-transcripts-note {
   font-size: 12px;
   color: #1d4ed8;
@@ -2634,7 +2647,7 @@
   /* Inset shadow instead of border-left: a differently-sized border-left doesn't
      follow border-radius's curve cleanly and looks pinched at the corners. */
   box-shadow: inset 3px 0 0 0 #2563eb;
-  border-radius: 8px;
+  border-radius: var(--r-sm, 8px);
   padding: 8px 10px 8px 13px;
   margin: 0 0 10px 0;
   line-height: 1.4;
@@ -2670,7 +2683,7 @@
 }
 
 .ce-transcript-card {
-  border-radius: 12px;
+  border-radius: var(--r-md, 12px);
   border: 1.5px solid var(--ce-border-2);
   padding: 14px;
   background: var(--ce-white);
@@ -2691,7 +2704,7 @@
   flex: none;
   width: 34px;
   height: 34px;
-  border-radius: 9px;
+  border-radius: var(--r-sm, 9px);
   background: var(--ce-primary);
   color: var(--ce-white);
   display: flex;
@@ -2722,7 +2735,7 @@
   color: var(--ce-primary);
   background: var(--ce-primary-tint);
   border: 1px solid var(--ce-primary-border);
-  border-radius: 20px;
+  border-radius: var(--r-lg, 20px);
   padding: 1px 7px;
 }
 
@@ -2815,7 +2828,7 @@
   display: flex;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 9px;
+  border-radius: var(--r-sm, 9px);
   background: var(--ce-bg-2);
 }
 
@@ -2841,7 +2854,7 @@
   font-size: 13px;
   line-height: 1.4;
   border: 1.5px solid var(--ce-border);
-  border-radius: 8px;
+  border-radius: var(--r-sm, 8px);
   color: var(--ce-ink);
   font-family: var(--ce-font);
   background: var(--ce-white);

@@ -105,6 +105,68 @@ describe('useEditor — hasTranscripts polling', () => {
       vi.useRealTimers();
     }
   });
+
+  it('stops polling after TRANSCRIPT_POLL_MAX_ATTEMPTS when transcripts never arrive', async () => {
+    vi.useFakeTimers();
+    try {
+      const readTranscripts = vi.fn().mockResolvedValue([]);
+      const service = svc({ readTranscripts });
+      (service.readContent as ReturnType<typeof vi.fn>).mockResolvedValue(videoContent());
+      renderHook(() => useEditor({ context: mockContext, contentId: 'do_video_1', service }));
+
+      await act(async () => { await vi.runOnlyPendingTimersAsync(); }); // initial check
+      for (let i = 0; i < 15; i++) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+      }
+      const callsAtCap = readTranscripts.mock.calls.length;
+      expect(callsAtCap).toBe(16); // 1 initial + 15 capped polls
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(20000 * 5); });
+      // No further reads once the cap is hit - this is the "polls forever" bug being fixed.
+      expect(readTranscripts.mock.calls.length).toBe(callsAtCap);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('skips the fetch (but keeps ticking) while the tab is hidden (negative)', async () => {
+    vi.useFakeTimers();
+    const originalHidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    try {
+      const readTranscripts = vi.fn().mockResolvedValue([]);
+      const service = svc({ readTranscripts });
+      (service.readContent as ReturnType<typeof vi.fn>).mockResolvedValue(videoContent());
+      renderHook(() => useEditor({ context: mockContext, contentId: 'do_video_1', service }));
+      await act(async () => { await vi.runOnlyPendingTimersAsync(); }); // initial check always fires
+      const callsAfterInitial = readTranscripts.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(20000 * 3); });
+      expect(readTranscripts.mock.calls.length).toBe(callsAfterInitial);
+    } finally {
+      vi.useRealTimers();
+      if (originalHidden) Object.defineProperty(document, 'hidden', originalHidden);
+    }
+  });
+
+  it('exposes the raw transcript list and transcriptsChecked alongside hasTranscripts', async () => {
+    const list = [{ identifier: 't1', language: 'English', status: 'Live' }];
+    const readTranscripts = vi.fn().mockResolvedValue(list);
+    const service = svc({ readTranscripts });
+    const result = await mountWithContent(service, videoContent());
+    await waitFor(() => expect(result.current.hasTranscripts).toBe(true));
+    expect(result.current.transcriptsChecked).toBe(true);
+    expect(result.current.transcripts).toEqual(list);
+  });
+
+  it('marks transcriptsChecked true immediately for non-video content, without ever reading (negative)', async () => {
+    const service = svc();
+    (service.readContent as ReturnType<typeof vi.fn>).mockResolvedValue(videoContent({ mimeType: 'application/pdf' }));
+    const { result } = renderHook(() => useEditor({ context: mockContext, contentId: 'do_video_1', service }));
+    await waitFor(() => expect(result.current.content).toBeTruthy());
+    expect(result.current.transcriptsChecked).toBe(true);
+    expect(result.current.transcripts).toEqual([]);
+    expect(service.readTranscripts).not.toHaveBeenCalled();
+  });
 });
 
 describe('useEditor — transcript generation on upload', () => {

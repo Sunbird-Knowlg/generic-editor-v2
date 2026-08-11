@@ -30,6 +30,8 @@ export interface EditorConfig {
   baseUrl?: string;
   /** Path prefix for action APIs; default '/action'. */
   apiSlug?: string;
+  /** Path prefix for the portal's Kong proxy (v1-compat routes like transcript reads); default '/portal'. */
+  portalSlug?: string;
   /** Extra headers merged into every request (e.g. auth for standalone use). */
   headers?: Record<string, string>;
   /** Cloud storage hints for presigned upload PUTs. */

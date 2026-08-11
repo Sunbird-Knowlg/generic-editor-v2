@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef } from 'react';
 import type { EditorController } from '../useEditor';
 import type { ContentData, EditorContext, RawTranscript } from '../types';
 import { getMimeTypeLabel, t } from '../i18n/i18n';
@@ -14,11 +14,14 @@ interface PlayerTranscript {
   sourceLanguage?: boolean;
 }
 
-/** Maps raw enrichment.transcripts into the shape sunbird-video-player expects, mirroring the portal's ContentService mapping (artifactUrl here is the VTT, not transcript.json). */
+/** Maps raw enrichment.transcripts into the shape sunbird-video-player expects, mirroring
+ *  the portal's ContentService mapping (artifactUrl here is the VTT, not transcript.json).
+ *  Requires an explicit 'Live' status - a missing status is treated the same safe way
+ *  TranscriptsDrawer.statusTone does (not-yet-approved), never served as a live caption. */
 function mapRawTranscripts(raw: RawTranscript[]): PlayerTranscript[] {
   return raw
     .filter((e): e is RawTranscript & { captionsUrl: string } =>
-      !!e.captionsUrl && (e.status ?? 'Live').toLowerCase() === 'live')
+      !!e.captionsUrl && e.status === 'Live')
     .map((e) => ({
       language: e.language || (e.languageCode || 'Unknown').toUpperCase(),
       identifier: e.code ?? e.identifier ?? '',
@@ -72,21 +75,15 @@ const RendererPreview: React.FC<{
 };
 
 const EditorPreview: React.FC<{ ed: EditorController; context: EditorContext }> = ({ ed, context }) => {
-  const { content, lang, previewUrl, previewConfig, service } = ed;
-  const [transcripts, setTranscripts] = useState<PlayerTranscript[]>([]);
-
-  useEffect(() => {
-    setTranscripts([]);
-    if (!content?.identifier || !isVideoMimeType(content.mimeType)) return;
-    service
-      .readTranscripts(content.identifier)
-      .then((raw) => setTranscripts(mapRawTranscripts(raw)))
-      .catch(() => setTranscripts([]));
-  }, [content?.identifier, content?.mimeType, service]);
+  const { content, lang, previewUrl, previewConfig, transcripts: rawTranscripts, transcriptsChecked } = ed;
 
   if (!content) return null;
 
-  // The iframe key below folds in transcripts.length to force one remount once they arrive, since merging them doesn't change identifier/artifactUrl.
+  const isVideo = isVideoMimeType(content.mimeType);
+  const transcripts = mapRawTranscripts(rawTranscripts);
+  // The iframe key changes only when the actual live-caption set changes (not just its
+  // count), so a same-count swap (one language leaves Live as another joins) still remounts.
+  const transcriptsKey = transcripts.map((tr) => tr.identifier).sort().join(',');
   const previewMetadata = transcripts.length ? { ...content, transcripts } : content;
 
   return (
@@ -98,13 +95,22 @@ const EditorPreview: React.FC<{ ed: EditorController; context: EditorContext }> 
         <span className="ce-preview-chip">{t(lang, 'PREVIEW_MODE')}</span>
       </div>
       <div className="ce-preview-frame">
-        <RendererPreview
-          key={`${content.identifier}-${content.artifactUrl ?? ''}-${transcripts.length}`}
-          content={previewMetadata}
-          context={context}
-          previewUrl={previewUrl}
-          previewConfig={previewConfig}
-        />
+        {isVideo && !transcriptsChecked ? (
+          // Wait for the first transcripts check before ever mounting the renderer, so a
+          // slow initial read can't yank the iframe out (and restart playback) right after
+          // the user presses play - by the time it first mounts, this is already settled.
+          <div className="ce-center" style={{ height: '100%' }}>
+            <div className="ce-spinner ce-spinner--sm" />
+          </div>
+        ) : (
+          <RendererPreview
+            key={`${content.identifier}-${content.artifactUrl ?? ''}-${transcriptsKey}`}
+            content={previewMetadata}
+            context={context}
+            previewUrl={previewUrl}
+            previewConfig={previewConfig}
+          />
+        )}
       </div>
     </div>
   );

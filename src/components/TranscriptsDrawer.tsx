@@ -1,31 +1,41 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Drawer from './Drawer';
 import type { EditorController } from '../useEditor';
 import type { RawTranscript, TranscriptSegment } from '../types';
 import { t, tf } from '../i18n/i18n';
 import { CaptionsIcon } from '../icons';
 
-/** Parses the artifactUrl transcript.json (Whisper-style `{segments:[...]}` or a bare array) into segments with a positional fallback `id`, returning null on any other shape. */
-function parseSegments(raw: unknown): TranscriptSegment[] | null {
+interface ParsedSegments {
+  /** Display/editing view - only the fields the UI needs. */
+  segments: TranscriptSegment[];
+  /** The original segment objects, index-aligned with `segments`, kept around so a save
+   *  can merge just the edited text back in rather than reconstructing (and thereby losing
+   *  any field the parser doesn't know about, e.g. Whisper's seek/tokens/avg_logprob/...). */
+  rawSegments: Record<string, unknown>[];
+}
+
+/** Parses the artifactUrl transcript.json (Whisper-style `{segments:[...]}` or a bare array), returning null on any other shape. `rawSegments[i]` corresponds to `segments[i]` (a segment dropped for a non-string `text` is dropped from both, in lockstep). */
+function parseSegments(raw: unknown): ParsedSegments | null {
   const obj = raw as Record<string, unknown> | null;
   const list = Array.isArray(raw) ? raw : Array.isArray(obj?.segments) ? (obj!.segments as unknown[]) : null;
   if (!list) return null;
-  const segments = list
-    .map((item, index) => {
-      const o = item as Record<string, unknown>;
-      const text = o.text ?? o.transcript ?? o.content;
-      if (typeof text !== 'string') return null;
-      const start = o.start ?? o.startTime ?? o.start_time;
-      const end = o.end ?? o.endTime ?? o.end_time;
-      return {
-        id: typeof o.id === 'number' ? o.id : index,
-        text,
-        start: typeof start === 'number' ? start : undefined,
-        end: typeof end === 'number' ? end : undefined,
-      } as TranscriptSegment;
-    })
-    .filter((s): s is TranscriptSegment => !!s);
-  return segments.length ? segments : null;
+  const segments: TranscriptSegment[] = [];
+  const rawSegments: Record<string, unknown>[] = [];
+  list.forEach((item, index) => {
+    const o = item as Record<string, unknown>;
+    const text = o.text ?? o.transcript ?? o.content;
+    if (typeof text !== 'string') return;
+    const start = o.start ?? o.startTime ?? o.start_time;
+    const end = o.end ?? o.endTime ?? o.end_time;
+    segments.push({
+      id: typeof o.id === 'number' ? o.id : index,
+      text,
+      start: typeof start === 'number' ? start : undefined,
+      end: typeof end === 'number' ? end : undefined,
+    });
+    rawSegments.push(o);
+  });
+  return segments.length ? { segments, rawSegments } : null;
 }
 
 function formatTimestamp(seconds?: number): string {
@@ -58,12 +68,15 @@ function statusTone(status?: string): StatusTone {
 }
 
 function statusLabel(lang: string, status?: string): string {
-  switch (statusTone(status)) {
-    case 'draft': return t(lang, 'STATUS_DRAFT');
-    case 'review': return t(lang, 'STATUS_NEEDS_REVIEW');
-    case 'processing': return t(lang, 'STATUS_PROCESSING');
-    case 'live': return t(lang, 'STATUS_LIVE');
-    case 'failed': return t(lang, 'STATUS_FAILED');
+  // Switches on the raw status (not statusTone, which already collapses anything
+  // unrecognized to 'draft') so a genuinely unexpected status still reaches the
+  // fallback instead of always being silently mislabeled "Draft".
+  switch (status) {
+    case 'Draft': return t(lang, 'STATUS_DRAFT');
+    case 'Review': return t(lang, 'STATUS_NEEDS_REVIEW');
+    case 'Processing': return t(lang, 'STATUS_PROCESSING');
+    case 'Live': return t(lang, 'STATUS_LIVE');
+    case 'Failed': return t(lang, 'STATUS_FAILED');
     default: return status || t(lang, 'STATUS_NEEDS_REVIEW');
   }
 }
@@ -94,8 +107,12 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
   /* Segments sub-view for one language. */
   const [activeLang, setActiveLang] = useState<RawTranscript | null>(null);
   const [segments, setSegments] = useState<TranscriptSegment[] | null>(null);
+  const [rawSegments, setRawSegments] = useState<Record<string, unknown>[] | null>(null);
   const [segmentsLoading, setSegmentsLoading] = useState(false);
   const [segmentsError, setSegmentsError] = useState(false);
+  /** Bumped by openSegments/closeSegments so a slow fetch for a language the user has
+   *  already navigated away from can't land its result onto the wrong (now-active) one. */
+  const segmentsRequestRef = useRef(0);
 
   /* Source-language segments can be edited (text only). */
   const [isEditingSegments, setIsEditingSegments] = useState(false);
@@ -126,14 +143,24 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
   };
 
   const closeSegments = () => {
+    segmentsRequestRef.current += 1; // discard any in-flight fetch for the language we're leaving
     setActiveLang(null);
     setSegments(null);
+    setRawSegments(null);
     setSegmentsError(false);
     setIsEditingSegments(false);
     setDraftSegments(null);
     setSaveError(null);
     setActionError(null);
     setPendingExpectedStatus(null);
+  };
+
+  /** "Back to languages" click handler - unlike closeSegments() alone (also used right after
+   *  an already-fresh confirmed approve/reject), this re-fetches so manually navigating back
+   *  without a confirmed action doesn't leave the list showing a stale, out-of-date status. */
+  const backToLanguages = () => {
+    closeSegments();
+    load();
   };
 
   /** Single re-read to check whether an approve/reject has actually landed -
@@ -193,13 +220,18 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
 
   const saveSegments = () => {
     const transcriptId = activeLang?.identifier ?? activeLang?.code;
-    if (!draftSegments || !content?.identifier || !transcriptId) return;
+    if (!draftSegments || !rawSegments || !content?.identifier || !transcriptId) return;
     setIsSaving(true);
     setSaveError(null);
+    // Merge only the edited text back into the original segment objects (index-aligned
+    // with draftSegments) instead of sending the reconstructed {id,text,start,end} view -
+    // any field the parser doesn't surface (Whisper's seek/tokens/avg_logprob/...) survives.
+    const merged = rawSegments.map((raw, i) => ({ ...raw, text: draftSegments[i]?.text ?? raw.text }));
     service
-      .updateTranscript(content.identifier, transcriptId, draftSegments)
+      .updateTranscript(content.identifier, transcriptId, merged)
       .then(() => {
         setSegments(draftSegments);
+        setRawSegments(merged);
         setIsEditingSegments(false);
         setDraftSegments(null);
       })
@@ -217,7 +249,9 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
     setPendingExpectedStatus(null);
     service
       .approveTranscript(content.identifier, transcriptId)
-      .then(() => confirmTranscriptStatus(transcriptId, 'Live'))
+      // A failed confirm re-read must not be reported as an approve failure - the
+      // approve itself already landed, so treat it the same as "not confirmed yet".
+      .then(() => confirmTranscriptStatus(transcriptId, 'Live').catch(() => false))
       .then((confirmed) => {
         if (confirmed) closeSegments();
         else {
@@ -249,7 +283,8 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
     setPendingExpectedStatus(null);
     service
       .rejectTranscript(content.identifier, transcriptId)
-      .then(() => confirmTranscriptStatus(transcriptId, 'Draft'))
+      // Same reasoning as handleApprove: a failed confirm re-read isn't a reject failure.
+      .then(() => confirmTranscriptStatus(transcriptId, 'Draft').catch(() => false))
       .then((confirmed) => {
         if (confirmed) closeSegments();
         else {
@@ -280,6 +315,7 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
         if (confirmed) closeSegments();
         else setActionError(t(lang, 'STATUS_UPDATE_PENDING'));
       })
+      .catch(() => setActionError(t(lang, 'ERROR_TRANSCRIPT_ACTION_FAILED')))
       .finally(() => setIsCheckingStatus(false));
   };
 
@@ -291,8 +327,10 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
 
   const openSegments = (tr: RawTranscript, startInEditMode = false) => {
     if (!tr.artifactUrl) return;
+    const requestToken = ++segmentsRequestRef.current;
     setActiveLang(tr);
     setSegments(null);
+    setRawSegments(null);
     setSegmentsError(false);
     setIsEditingSegments(false);
     setDraftSegments(null);
@@ -301,16 +339,20 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
     fetch(tr.artifactUrl)
       .then((r) => r.json())
       .then((json) => {
+        // A slower fetch for a language the user has since navigated away from (Back,
+        // or straight to another language) must not clobber whatever's active now.
+        if (segmentsRequestRef.current !== requestToken) return;
         const parsed = parseSegments(json);
         if (!parsed) { setSegmentsError(true); return; }
-        setSegments(parsed);
+        setSegments(parsed.segments);
+        setRawSegments(parsed.rawSegments);
         if (startInEditMode) {
-          setDraftSegments(parsed.map((s) => ({ ...s })));
+          setDraftSegments(parsed.segments.map((s) => ({ ...s })));
           setIsEditingSegments(true);
         }
       })
-      .catch(() => setSegmentsError(true))
-      .finally(() => setSegmentsLoading(false));
+      .catch(() => { if (segmentsRequestRef.current === requestToken) setSegmentsError(true); })
+      .finally(() => { if (segmentsRequestRef.current === requestToken) setSegmentsLoading(false); });
   };
 
   const handleModifyClick = (tr: RawTranscript) => {
@@ -334,7 +376,7 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
     const displaySegments = isEditingSegments ? draftSegments : segments;
     return (
     <div className="ce-transcript-segments-view">
-      <button type="button" className="ce-link-btn ce-transcript-back" onClick={closeSegments}>
+      <button type="button" className="ce-link-btn ce-transcript-back" onClick={backToLanguages}>
         ← {t(lang, 'BACK_TO_LANGUAGES')}
       </button>
       <div className="ce-transcript-segments-head">
@@ -459,15 +501,17 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
           <div className="ce-transcript-list">
             {/* Source language always leads the list - a stable sort keeps every other
                 language in whatever order the backend returned them. */}
-            {[...transcripts].sort((a, b) => Number(!!b.sourceLanguage) - Number(!!a.sourceLanguage)).map((tr) => {
+            {[...transcripts].sort((a, b) => Number(!!b.sourceLanguage) - Number(!!a.sourceLanguage)).map((tr, i) => {
               const tone = statusTone(tr.status);
               // Processing transcripts don't have language/languageCode populated yet -
               // a caption glyph reads as "still figuring this out", unlike a literal "??".
               const code = (tr.languageCode || tr.language || '').slice(0, 2).toUpperCase();
               const generatedLabel = tr.sourceLanguage ? t(lang, 'TRANSCRIPT_AUTO_GENERATED') : t(lang, 'TRANSCRIPT_TRANSLATED');
               const when = relativeTime(lang, tr.generatedOn);
+              // Processing entries can have none of identifier/code/languageCode yet - the
+              // positional fallback avoids an undefined (and possibly duplicated) React key.
               return (
-                <div key={tr.identifier ?? tr.code ?? tr.languageCode} className={`ce-transcript-card ce-transcript-card--${tone}`}>
+                <div key={tr.identifier ?? tr.code ?? tr.languageCode ?? `idx-${i}`} className={`ce-transcript-card ce-transcript-card--${tone}`}>
                   <div className="ce-transcript-card-head">
                     <span className="ce-transcript-avatar">{code || <CaptionsIcon size={15} />}</span>
                     <div className="ce-transcript-meta">
@@ -494,8 +538,18 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
                         {t(lang, 'MODIFY_TRANSCRIPT')}
                       </button>
                     )}
+                    {/* captionsUrl is cross-origin (blob/CDN), so `download` is ignored by the
+                        browser there - target=_blank at least keeps a click from navigating
+                        the editor itself away to the raw file. */}
                     {tone === 'live' && tr.captionsUrl && (
-                      <a className="ce-btn ce-btn--ghost" href={tr.captionsUrl} download aria-label={t(lang, 'DOWNLOAD_CAPTIONS')}>
+                      <a
+                        className="ce-btn ce-btn--ghost"
+                        href={tr.captionsUrl}
+                        download
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={t(lang, 'DOWNLOAD_CAPTIONS')}
+                      >
                         {t(lang, 'DOWNLOAD_CAPTIONS')}
                       </a>
                     )}
@@ -521,6 +575,7 @@ const TranscriptsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
       titleIcon={<CaptionsIcon size={18} />}
       title={t(lang, 'TRANSCRIPTS_TITLE')}
       closeLabel={t(lang, 'CLOSE')}
+      className="ce-drawer--transcripts"
     >
       {activeLang ? renderSegmentsView() : renderLanguagesView()}
     </Drawer>

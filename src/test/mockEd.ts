@@ -78,6 +78,9 @@ export function makeEd(over: Partial<EditorController> = {}): EditorController {
     assetPicker: null,
     reviewSubmitMode: false,
     hasReviewComments: false,
+    hasTranscripts: false,
+    transcripts: [],
+    transcriptsChecked: true,
     // setters
     setDrawer: vi.fn(),
     setContentType: vi.fn(),

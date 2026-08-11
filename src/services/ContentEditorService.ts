@@ -1,5 +1,5 @@
 /** ContentEditorService — backend abstraction for the editor; calls go to relative `/action/...` (proxied to knowledge-mw/Kong) by default, overridable via EditorConfig. */
-import type { ContentData, EditorContext, EditorConfig, FrameworkCategory, FormField, AssetItem, RawTranscript, TranscriptSegment } from '../types';
+import type { ContentData, EditorContext, EditorConfig, FrameworkCategory, FormField, AssetItem, RawTranscript } from '../types';
 
 const DEFAULT_ENDPOINTS = {
   /* Versions verified against the portal's ContentService, the old generic editor, and the backend proxy; all hit /action → knowledge-mw. */
@@ -70,6 +70,7 @@ export function normalizeContent(raw: Record<string, unknown>): ContentData {
 export class ContentEditorService {
   private baseUrl: string;
   private apiSlug: string;
+  private portalSlug: string;
   private headers: Record<string, string>;
   private fetchImpl: typeof fetch;
   private ep: typeof DEFAULT_ENDPOINTS;
@@ -77,6 +78,7 @@ export class ContentEditorService {
   constructor(config: EditorConfig = {}, endpoints?: EndpointMap, context?: EditorContext) {
     this.baseUrl = (config.baseUrl ?? '').replace(/\/$/, '');
     this.apiSlug = config.apiSlug ?? '/action';
+    this.portalSlug = config.portalSlug ?? '/portal';
     // knowledge-mw/lock require these device+client headers on every /action call; explicit config.headers always win.
     const did = context?.did || (typeof localStorage !== 'undefined' ? localStorage.getItem('deviceId') || '' : '');
     const contextHeaders: Record<string, string> = {
@@ -103,11 +105,11 @@ export class ContentEditorService {
     method: string,
     path: string,
     body?: unknown,
-    opts?: { cache?: RequestCache },
+    opts?: { cache?: RequestCache; headers?: Record<string, string> },
   ): Promise<T> {
     const resp = await this.fetchImpl(this.url(path), {
       method,
-      headers: this.headers,
+      headers: { ...this.headers, ...(opts?.headers ?? {}) },
       credentials: 'same-origin',
       body: body !== undefined ? JSON.stringify(body) : undefined,
       ...(opts?.cache ? { cache: opts.cache } : {}),
@@ -168,10 +170,15 @@ export class ContentEditorService {
     return String(result.identifier ?? result.node_id ?? '');
   }
 
-  /** GET content/v3/read/{id}?mode=edit — no-store, since this page re-reads its own content right after mutating it. */
+  /** GET content/v3/read/{id}?mode=edit — no-store, since this page re-reads its own content right after
+   *  mutating it; also sends Cache-Control: no-cache so an intermediary gateway cache (e.g. Kong's
+   *  proxy-cache plugin, which honors this request header) doesn't serve a pre-mutation response. */
   async readContent(contentId: string, mode = 'edit'): Promise<ContentData> {
     const path = `${this.ep.read}/${encodeURIComponent(contentId)}?mode=${mode}&fields=${READ_FIELDS}`;
-    const result = await this.request<{ content: Record<string, unknown> }>('GET', path, undefined, { cache: 'no-store' });
+    const result = await this.request<{ content: Record<string, unknown> }>('GET', path, undefined, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+    });
     return normalizeContent(result.content);
   }
 
@@ -201,8 +208,12 @@ export class ContentEditorService {
     });
   }
 
-  /** PATCH content/v4/enrichment/object/update/{contentId}/{transcriptId} — persists the full segment list (the API expects the whole set, not a diff). */
-  async updateTranscript(contentId: string, transcriptId: string, segments: TranscriptSegment[]): Promise<unknown> {
+  /** PATCH content/v4/enrichment/object/update/{contentId}/{transcriptId} — persists the full segment
+   *  list (the API expects the whole set, not a diff). Callers should send back the original segment
+   *  objects with only the edited fields changed (not a reconstruction), so unrecognized fields the
+   *  parser doesn't know about (Whisper's seek/tokens/... etc.) survive a round-trip - hence `unknown[]`
+   *  rather than `TranscriptSegment[]` here. */
+  async updateTranscript(contentId: string, transcriptId: string, segments: unknown[]): Promise<unknown> {
     return this.request(
       'PATCH',
       `${this.ep.transcriptUpdate}/${encodeURIComponent(contentId)}/${encodeURIComponent(transcriptId)}`,
@@ -228,11 +239,20 @@ export class ContentEditorService {
     );
   }
 
-  /** GET /portal/content/v1/read/{id}?enrich=all — bypasses this.apiSlug and hits /portal directly, since v1/read+enrich=all only works via Kong's proxy, not direct-to-knowledge-mw /action routes. */
+  /** GET {portalSlug}/content/v1/read/{id}?enrich=all — bypasses this.apiSlug and hits the portal
+   *  proxy directly (default '/portal', overridable via config.portalSlug), since v1/read+enrich=all
+   *  only works via Kong's proxy, not direct-to-knowledge-mw /action routes. */
   async readTranscripts(contentId: string): Promise<RawTranscript[]> {
-    const url = `${this.baseUrl}/portal/${this.ep.transcriptsRead}/${encodeURIComponent(contentId)}?fields=identifier&enrich=all`;
-    // no-store: transcript status changes server-side on its own, so a cached 304 here can serve a stale status.
-    const resp = await this.fetchImpl(url, { method: 'GET', headers: this.headers, credentials: 'same-origin', cache: 'no-store' });
+    const url = `${this.baseUrl}${this.portalSlug}/${this.ep.transcriptsRead}/${encodeURIComponent(contentId)}?fields=identifier&enrich=all`;
+    // no-store (browser-local) + Cache-Control: no-cache (honored by Kong's proxy-cache plugin to
+    // bypass its gateway-level cache) - transcript status changes server-side right after approve/
+    // reject, so either layer serving a cached response here can show a stale status.
+    const resp = await this.fetchImpl(url, {
+      method: 'GET',
+      headers: { ...this.headers, 'Cache-Control': 'no-cache' },
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
     let data: { result?: { content?: { enrichment?: { transcripts?: RawTranscript[] } } }; responseCode?: string; params?: { errmsg?: string } } = {};
     let parseFailed = false;
     try { data = await resp.json(); } catch { parseFailed = true; }

@@ -1,18 +1,38 @@
 import React, { useRef } from 'react';
 import type { EditorController } from '../useEditor';
-import type { ContentData, EditorContext } from '../types';
+import type { ContentData, EditorContext, RawTranscript } from '../types';
 import { getMimeTypeLabel, t } from '../i18n/i18n';
 import { FileIcon } from '../icons';
+import { isVideoMimeType } from '../constants';
 
-/**
- * Preview via the legacy ekstep content renderer — the same mechanism the old
- * generic editor used (org.ekstep.genericeditorpreview). One renderer handles all
- * mimeTypes (video/pdf/epub/ecml/html/scorm/h5p/youtube/url) through its coreplugins.
- *
- * Loads `content/preview/preview.html?webview=true` in an iframe (same-origin via the
- * host proxy), then calls its global `initializePreview()` with the content id +
- * metadata. No player-v2 dependency, no client-side unzip.
- */
+interface PlayerTranscript {
+  language: string;
+  identifier: string;
+  languageCode: string;
+  artifactUrl: string;
+  wordByWordUrl?: string;
+  sourceLanguage?: boolean;
+}
+
+/** Maps raw enrichment.transcripts into the shape sunbird-video-player expects, mirroring
+ *  the portal's ContentService mapping (artifactUrl here is the VTT, not transcript.json).
+ *  Requires an explicit 'Live' status - a missing status is treated the same safe way
+ *  TranscriptsDrawer.statusTone does (not-yet-approved), never served as a live caption. */
+function mapRawTranscripts(raw: RawTranscript[]): PlayerTranscript[] {
+  return raw
+    .filter((e): e is RawTranscript & { captionsUrl: string } =>
+      !!e.captionsUrl && e.status === 'Live')
+    .map((e) => ({
+      language: e.language || (e.languageCode || 'Unknown').toUpperCase(),
+      identifier: e.code ?? e.identifier ?? '',
+      languageCode: e.languageCode || '',
+      artifactUrl: e.captionsUrl,
+      wordByWordUrl: e.captionsUrl,
+      sourceLanguage: !!e.sourceLanguage,
+    }));
+}
+
+/** Preview via the legacy ekstep content renderer (all mimeTypes through its coreplugins), loaded in an iframe and driven via its global `initializePreview()`. */
 const RendererPreview: React.FC<{
   content: ContentData; context: EditorContext; previewUrl: string; previewConfig: Record<string, unknown>;
 }> = ({ content, context, previewUrl, previewConfig }) => {
@@ -55,8 +75,16 @@ const RendererPreview: React.FC<{
 };
 
 const EditorPreview: React.FC<{ ed: EditorController; context: EditorContext }> = ({ ed, context }) => {
-  const { content, lang, previewUrl, previewConfig } = ed;
+  const { content, lang, previewUrl, previewConfig, transcripts: rawTranscripts, transcriptsChecked } = ed;
+
   if (!content) return null;
+
+  const isVideo = isVideoMimeType(content.mimeType);
+  const transcripts = mapRawTranscripts(rawTranscripts);
+  // The iframe key changes only when the actual live-caption set changes (not just its
+  // count), so a same-count swap (one language leaves Live as another joins) still remounts.
+  const transcriptsKey = transcripts.map((tr) => tr.identifier).sort().join(',');
+  const previewMetadata = transcripts.length ? { ...content, transcripts } : content;
 
   return (
     <div className="ce-preview-card">
@@ -67,13 +95,22 @@ const EditorPreview: React.FC<{ ed: EditorController; context: EditorContext }> 
         <span className="ce-preview-chip">{t(lang, 'PREVIEW_MODE')}</span>
       </div>
       <div className="ce-preview-frame">
-        <RendererPreview
-          key={`${content.identifier}-${content.artifactUrl ?? ''}`}
-          content={content}
-          context={context}
-          previewUrl={previewUrl}
-          previewConfig={previewConfig}
-        />
+        {isVideo && !transcriptsChecked ? (
+          // Wait for the first transcripts check before ever mounting the renderer, so a
+          // slow initial read can't yank the iframe out (and restart playback) right after
+          // the user presses play - by the time it first mounts, this is already settled.
+          <div className="ce-center" style={{ height: '100%' }}>
+            <div className="ce-spinner ce-spinner--sm" />
+          </div>
+        ) : (
+          <RendererPreview
+            key={`${content.identifier}-${content.artifactUrl ?? ''}-${transcriptsKey}`}
+            content={previewMetadata}
+            context={context}
+            previewUrl={previewUrl}
+            previewConfig={previewConfig}
+          />
+        )}
       </div>
     </div>
   );

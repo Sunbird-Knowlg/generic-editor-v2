@@ -1,12 +1,8 @@
-/**
- * useEditor — the editor controller. Owns content + view state and orchestrates
- * the services (content CRUD, upload, telemetry). UI components are thin and call
- * these actions.
- */
+/** useEditor — the editor controller; owns content/view state and orchestrates services while UI components stay thin and just call its actions. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ContentData, DrawerKind, EditorConfig, EditorContext, EditorEventPayload,
-  EditorMode, EditorView, UploadProgress,
+  EditorMode, EditorView, RawTranscript, UploadProgress,
 } from './types';
 import { ContentEditorService } from './services/ContentEditorService';
 import { UploadService, detectFileMime, detectUrlMime } from './services/UploadService';
@@ -15,7 +11,7 @@ import type { TelemetryEvent } from './telemetry/telemetry.types';
 import { t, tf } from './i18n/i18n';
 import {
   DEFAULT_MAX_FILE_SIZE_MB, DEFAULT_PRIMARY_CATEGORIES, EDITOR_EVENTS,
-  IDLE_TIMEOUT_MS, LARGE_UPLOAD_EXTENSIONS, LARGE_UPLOAD_MAX_MB, STATUS,
+  IDLE_TIMEOUT_MS, isVideoMimeType, LARGE_UPLOAD_EXTENSIONS, LARGE_UPLOAD_MAX_MB, STATUS,
 } from './constants';
 
 export interface UseEditorOptions {
@@ -37,6 +33,10 @@ export interface ToastState {
 }
 
 const REVIEWER_ROLES = ['CONTENT_REVIEWER', 'BOOK_REVIEWER'];
+
+const TRANSCRIPT_POLL_MS = 20000;
+/** ~5 minutes of active (non-hidden) polling - generation is expected to finish well within this. */
+const TRANSCRIPT_POLL_MAX_ATTEMPTS = 15;
 
 function resolveMode(status: string | undefined, roles: string[] = []): EditorMode {
   const s = (status || STATUS.DRAFT).toLowerCase().trim();
@@ -246,9 +246,9 @@ export function useEditor(opts: UseEditorOptions) {
     [content, service, context, contentType, reload, emit],
   );
 
-  /* ---- Upload a file ---- */
+  /* ---- Upload a file --- wantTranscripts is the upload-time "generate transcripts?" checkbox value; it fires the API call right after upload completes, not deferred to submit-for-review. */
   const uploadFile = useCallback(
-    async (file: File) => {
+    async (file: File, wantTranscripts?: boolean) => {
       if (uploadingRef.current) return; // ignore re-entry (double-click / re-drop)
       if (!content?.identifier && !contentType) {
         showToast(t(lang, 'CONTENT_TYPE_REQUIRED'), 'error');
@@ -276,8 +276,8 @@ export function useEditor(opts: UseEditorOptions) {
       setBusyAction('upload');
       setView('uploading');
       setProgress({ percent: 0, bytesUploaded: 0, totalBytes: file.size });
-      emit(EDITOR_EVENTS.UPLOAD_START, { mimeType, size: file.size });
-      telemetry.current?.interact('click', 'uploadButton', 'upload', { mimeType });
+      emit(EDITOR_EVENTS.UPLOAD_START, { mimeType, size: file.size, generateTranscripts: wantTranscripts });
+      telemetry.current?.interact('click', 'uploadButton', 'upload', { mimeType, generateTranscripts: wantTranscripts });
       try {
         const { id } = await ensureContent(mimeType);
         const signed = await uploader.getPresignedUrl(id, file.name);
@@ -290,6 +290,13 @@ export function useEditor(opts: UseEditorOptions) {
         await reload(id);
         setView('player');
         emit(EDITOR_EVENTS.UPLOAD_COMPLETE, { id });
+        if (wantTranscripts && isVideoMimeType(mimeType)) {
+          // Non-fatal: the upload itself already succeeded - a failed transcript
+          // kickoff shouldn't block or scare the user, just isn't retried here.
+          service.createTranscript(id).catch((err) => {
+            telemetry.current?.error(String((err as Error)?.message ?? err), 'transcript');
+          });
+        }
         setUploadSuccess(true);
         setTimeout(() => setUploadSuccess(false), 2500);
       } catch (err) {
@@ -305,7 +312,7 @@ export function useEditor(opts: UseEditorOptions) {
         if (!cancelledRef.current) setProgress(null);
       }
     },
-    [maxMB, largeUpload, contentType, lang, emit, ensureContent, uploader, reload, content, showToast],
+    [maxMB, largeUpload, contentType, lang, emit, ensureContent, uploader, reload, content, showToast, service],
   );
 
   /* ---- Upload from a URL ---- */
@@ -457,10 +464,7 @@ export function useEditor(opts: UseEditorOptions) {
     return errs;
   }, [content, lang]);
 
-  /**
-   * Async variant: fetches form/read with action='review' to get required fields
-   * dynamically, then validates content against them. Falls back to static list on error.
-   */
+  /** Async variant: validates against dynamically-fetched review-form required fields, falling back to the static list on error. */
   const validateForReviewAsync = useCallback(async (override?: ContentData): Promise<string[]> => {
     const c = override ?? content;
     if (!c) return [t(lang, 'ERROR_LOAD')];
@@ -510,10 +514,7 @@ export function useEditor(opts: UseEditorOptions) {
     }
   }, [content, service, emit, lang, showToast, onClose]);
 
-  /**
-   * Save-edited-metadata then submit for review (the "Send for review" → edit details → submit flow).
-   * Persists fields first, re-validates against the review form, and only sends if valid.
-   */
+  /** Saves edited metadata, re-validates against the review form, and only submits for review if valid. */
   const saveMetadataAndSubmit = useCallback(
     async (fields: Record<string, unknown>) => {
       if (!content?.identifier) return;
@@ -620,10 +621,7 @@ export function useEditor(opts: UseEditorOptions) {
     onClose?.();
   }, [content, service, emit, onClose]);
 
-  /* ---- Inactivity / session-timeout prompt ----
-     Mirrors the old editor's "session timed out due to inactivity" popup.
-     A 30-min idle timer reset on user activity; on fire it shows a prompt with
-     Continue / Close Editor. Telemetry fires on prompt + resolution. */
+  /* ---- Inactivity / session-timeout prompt: mirrors the old editor's idle-timeout popup, resetting a timer on activity and showing Continue/Close when it fires. */
   const dismissSessionExpiry = useCallback(() => {
     setSessionExpired(false);
     telemetry.current?.interact('click', 'sessionPrompt', 'continue');
@@ -664,12 +662,52 @@ export function useEditor(opts: UseEditorOptions) {
   /** True when content was rejected and has reviewer suggestions to show. */
   const hasReviewComments = !!(content?.rejectReasons?.length || content?.rejectComment);
 
+  /* ---- Transcripts: single fetch owner for the raw list (EditorPreview/TranscriptsDrawer
+     read it from here instead of each independently re-fetching the same slow ?enrich=all
+     payload). Gates the header's "View transcript" button and feeds the preview's live
+     captions. Polls every 20s until transcripts exist since generation is async - capped
+     at TRANSCRIPT_POLL_MAX_ATTEMPTS so a video that never gets transcripts (box left
+     unchecked, or generation failed) doesn't poll for the rest of the session, and skips
+     the fetch (without stopping the poll) while the tab is hidden. */
+  const [transcripts, setTranscripts] = useState<RawTranscript[]>([]);
+  const [transcriptsChecked, setTranscriptsChecked] = useState(false);
+  const hasTranscripts = transcripts.length > 0;
+  useEffect(() => {
+    setTranscripts([]);
+    setTranscriptsChecked(false);
+    if (!content?.identifier || !isVideoMimeType(content.mimeType)) { setTranscriptsChecked(true); return; }
+    const id = content.identifier;
+    let found = false;
+    let attempts = 0;
+    const check = () => {
+      service
+        .readTranscripts(id)
+        .then((list) => {
+          if (!mountedRef.current || found) return;
+          found = list.length > 0;
+          setTranscripts(list);
+        })
+        .catch(() => { if (mountedRef.current && !found) setTranscripts([]); })
+        .finally(() => { if (mountedRef.current) setTranscriptsChecked(true); });
+    };
+    check();
+    const interval = setInterval(() => {
+      if (found) { clearInterval(interval); return; }
+      attempts += 1;
+      if (attempts > TRANSCRIPT_POLL_MAX_ATTEMPTS) { clearInterval(interval); return; }
+      if (typeof document !== 'undefined' && document.hidden) return;
+      check();
+    }, TRANSCRIPT_POLL_MS);
+    return () => clearInterval(interval);
+  }, [content?.identifier, content?.mimeType, service]);
+
   return {
     // state
     content, view, drawer, toast, progress, contentType, uploadUrl, urlError, busy, busyAction, mode, lang, categories,
     maxMB, largeUpload, headerLogo, previewUrl, previewConfig, framework: context.framework,
     userId: context.user?.id, rootOrgId: context.user?.rootOrgId, userRoles: context.user?.roles ?? [],
     reviewErrors, uploadSuccess, sessionExpired, assetPicker, reviewSubmitMode, hasReviewComments,
+    hasTranscripts, transcripts, transcriptsChecked,
     // setters
     setDrawer: openDrawer, setContentType, setUploadUrl, setUrlError, showToast, setReviewErrors, setReviewSubmitMode,
     dismissSessionExpiry, openAssetPicker, closeAssetPicker,

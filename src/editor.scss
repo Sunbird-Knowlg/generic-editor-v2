@@ -1,15 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap');
 
-/*
- * ============================================================
- * SUNBIRD CONTENT EDITOR v2 — THEME SYSTEM
- * ============================================================
- * 6 seed variables drive every accent colour. Default = blue.
- * When embedded in the portal, ThemeProvider sets these inline on
- * documentElement and overrides the defaults below (same cascade
- * trick player-v2 uses). Neutral slate tokens are theme-invariant.
- * ============================================================
- */
+/* Theme system: 6 seed variables drive every accent colour (default blue), overridable inline by the portal's ThemeProvider; slate tokens are theme-invariant. */
 
 :root {
   /* ---- 6 seed variables (default = Sunbird Spark "blue") ---- */
@@ -407,9 +398,7 @@
 }
 
 .ce-select {
-  /* Match the multi-select control (.ce-multi-control) so single/multi fields line up.
-     Size via symmetric vertical padding (not a fixed height) with a normal line-height
-     so an appearance:none <select> centres its value and never clips descenders. */
+  /* Matches .ce-multi-control's sizing via symmetric padding so an appearance:none <select> centres its value without clipping descenders. */
   line-height: 1.4;
   font-size: 13px;
   padding: 10px 40px 10px 14px;
@@ -937,9 +926,7 @@
   border-width: 3px;
 }
 
-/* In-button loaders must always be tiny, regardless of any size modifier or
-   stale/cached CSS. Higher specificity than .ce-spinner / .ce-spinner--xs so it
-   always wins inside buttons. */
+/* Higher specificity than .ce-spinner/.ce-spinner--xs so in-button loaders always stay tiny regardless of any size modifier. */
 .ce-btn .ce-spinner,
 .ce-icon-btn .ce-spinner {
   width: 14px;
@@ -1081,9 +1068,7 @@
   border-radius: 18px;
   box-shadow: 0 4px 6px rgba(15, 23, 42, 0.04), 0 12px 36px rgba(15, 23, 42, 0.08);
   overflow: hidden;
-  /* Centre via auto margins, not the parent's align-items — a sibling package
-     forces `.ce-main { align-items: normal !important }` which specificity can't
-     beat; auto margins are immune to it. */
+  /* Auto margins, not the parent's align-items - a sibling package's !important on .ce-main beats specificity but not auto margins. */
   margin: 18px auto 0;
 }
 
@@ -1183,9 +1168,7 @@
   overflow: hidden;
 }
 
-/* dir lives on the `.ce-editor` root itself, so this must be `&[dir='rtl']`
- * (root-with-attr), not `[dir='rtl'] …` (a descendant) — the CSS is wrapped
- * under `.ce-editor` at build, and a descendant selector would never match. */
+/* Must be `&[dir='rtl']` (root-with-attr), not a descendant selector, since `dir` lives on the `.ce-editor` root this is wrapped under. */
 &[dir='rtl'] .ce-drawer {
   transform: translateX(-100%);
   box-shadow: 6px 0 32px rgba(15, 23, 42, 0.11);
@@ -2341,6 +2324,13 @@
   padding: 14px 18px 22px;
 }
 
+/* The video generate-transcripts confirm panel (file row + checkbox + hint +
+   actions) is taller than the fixed drop-area height - let it grow instead. */
+.ce-area.ce-area--tall {
+  height: auto;
+  min-height: 216px;
+}
+
 .ce-area-head {
   display: flex;
   justify-content: center;
@@ -2477,6 +2467,59 @@
   margin-top: 2px;
 }
 
+.ce-video-confirm {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ce-transcript-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+
+.ce-transcript-check input[type='checkbox'] {
+  margin-top: 2px;
+  accent-color: var(--ce-primary);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.ce-transcript-check-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ce-ink);
+}
+
+.ce-transcript-check-hint {
+  display: block;
+  font-size: 12px;
+  color: var(--ce-slate-500);
+  margin-top: 2px;
+}
+
+.ce-video-confirm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+}
+
+.ce-video-confirm-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 12px;
+}
+
 .ce-uploading-ring-wrap {
   display: flex;
   flex-direction: column;
@@ -2582,14 +2625,249 @@
   }
 }
 
-/* ============================================================
- * FOREIGN GLOBAL-RESET GUARD
- * A sibling package (questionset editor) ships an element-level reset that leaks
- * document-wide: `p,li,figcaption { max-inline-size: 70ch; text-wrap: pretty }`
- * and `h1..h6 { text-wrap: balance }`. Those cap our paragraphs at ~70ch and
- * balance short lines mid-sentence. Re-assert normal flow for editor text
- * (specificity 0,1,1 > their 0,0,1 — no !important needed).
- * ============================================================ */
+/* ============================ TRANSCRIPTS DRAWER ============================ */
+/* Scoped to this drawer only - redefining --ce-font here (rather than at .ce-editor)
+   means only the transcripts page follows the portal's live font choice, leaving
+   every other drawer/component on the fixed default. --ce-btn/--ce-icon-btn are
+   shared classes reused app-wide, so their radius is overridden here rather than
+   at their own definition to keep that reuse untouched elsewhere. */
+.ce-drawer--transcripts {
+  --ce-font: var(--app-font-family, 'Rubik'), system-ui, -apple-system, sans-serif;
+}
+.ce-drawer--transcripts .ce-btn,
+.ce-drawer--transcripts .ce-icon-btn {
+  border-radius: var(--r-sm, 9px);
+}
+
+.ce-transcripts-note {
+  font-size: 12px;
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  /* Inset shadow instead of border-left: a differently-sized border-left doesn't
+     follow border-radius's curve cleanly and looks pinched at the corners. */
+  box-shadow: inset 3px 0 0 0 #2563eb;
+  border-radius: var(--r-sm, 8px);
+  padding: 8px 10px 8px 13px;
+  margin: 0 0 10px 0;
+  line-height: 1.4;
+}
+
+.ce-transcripts-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 40px 16px;
+  color: var(--ce-slate-500);
+}
+
+.ce-transcripts-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ce-ink);
+  margin: 6px 0 0 0;
+}
+
+.ce-transcripts-empty-sub {
+  font-size: 12.5px;
+  margin: 0;
+  max-width: 260px;
+}
+
+.ce-transcript-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ce-transcript-card {
+  border-radius: var(--r-md, 12px);
+  border: 1.5px solid var(--ce-border-2);
+  padding: 14px;
+  background: var(--ce-white);
+}
+
+.ce-transcript-card--live { border-color: rgba(22, 163, 74, 0.35); background: rgba(22, 163, 74, 0.05); }
+.ce-transcript-card--review { border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.06); }
+.ce-transcript-card--processing { border-color: rgba(37, 99, 235, 0.3); background: rgba(37, 99, 235, 0.05); }
+.ce-transcript-card--failed { border-color: rgba(220, 38, 38, 0.3); background: rgba(220, 38, 38, 0.05); }
+
+.ce-transcript-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.ce-transcript-avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-sm, 9px);
+  background: var(--ce-primary);
+  color: var(--ce-white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ce-transcript-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.ce-transcript-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ce-ink);
+}
+
+.ce-transcript-source-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ce-primary);
+  background: var(--ce-primary-tint);
+  border: 1px solid var(--ce-primary-border);
+  border-radius: var(--r-lg, 20px);
+  padding: 1px 7px;
+}
+
+.ce-transcript-sub {
+  font-size: 12px;
+  color: var(--ce-slate-500);
+  margin-top: 2px;
+}
+
+.ce-transcript-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ce-transcript-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.ce-transcript-status--live { color: #16a34a; }
+.ce-transcript-status--live .ce-transcript-status-dot { background: #16a34a; }
+.ce-transcript-status--review { color: #b45309; }
+.ce-transcript-status--review .ce-transcript-status-dot { background: #f59e0b; }
+.ce-transcript-status--processing { color: #2563eb; }
+.ce-transcript-status--processing .ce-transcript-status-dot { background: #2563eb; }
+.ce-transcript-status--failed { color: #dc2626; }
+.ce-transcript-status--failed .ce-transcript-status-dot { background: #dc2626; }
+
+.ce-transcript-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ce-transcript-back {
+  padding: 0;
+  margin-bottom: 12px;
+}
+
+.ce-transcript-segments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ce-transcript-segments-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ce-ink);
+}
+
+.ce-transcript-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ce-transcript-action-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ce-transcript-segment-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ce-transcript-segment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ce-transcript-segment {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm, 9px);
+  background: var(--ce-bg-2);
+}
+
+.ce-transcript-segment-time {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ce-slate-500);
+  font-variant-numeric: tabular-nums;
+  padding-top: 1px;
+}
+
+.ce-transcript-segment-text {
+  font-size: 13px;
+  color: var(--ce-ink-2);
+  line-height: 1.4;
+}
+
+.ce-transcript-segment-input {
+  flex: 1;
+  min-height: 44px;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  border: 1.5px solid var(--ce-border);
+  border-radius: var(--r-sm, 8px);
+  color: var(--ce-ink);
+  font-family: var(--ce-font);
+  background: var(--ce-white);
+  outline: none;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.ce-transcript-segment-input:focus {
+  border-color: var(--ce-primary);
+}
+
+/* Foreign global-reset guard: re-asserts normal text flow to override a sibling package's document-wide element reset (max-inline-size/text-wrap) via higher specificity. */
 .ce-editor p,
 .ce-editor li,
 .ce-editor figcaption {

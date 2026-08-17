@@ -30,6 +30,8 @@ export interface EditorConfig {
   baseUrl?: string;
   /** Path prefix for action APIs; default '/action'. */
   apiSlug?: string;
+  /** Path prefix for the portal's Kong proxy (v1-compat routes like transcript reads); default '/portal'. */
+  portalSlug?: string;
   /** Extra headers merged into every request (e.g. auth for standalone use). */
   headers?: Record<string, string>;
   /** Cloud storage hints for presigned upload PUTs. */
@@ -47,11 +49,7 @@ export interface EditorConfig {
   headerLogo?: string;
   /** Legacy ekstep content-renderer preview page. Default `/content/preview/preview.html`. */
   previewUrl?: string;
-  /**
-   * Config object handed to the renderer's `initializePreview({ config })` — mirrors the old
-   * generic editor's `previewConfig`. Use it to pass endpage/endscreen options, e.g.
-   * `{ showEndpage: true, endpageConfig: {...} }`. Defaults to `{ showEndpage: true }`.
-   */
+  /** Config object handed to the renderer's `initializePreview({ config })` for endpage/endscreen options, e.g. `{ showEndpage: true }` (the default). */
   previewConfig?: Record<string, unknown>;
   telemetry?: { url?: string; batchSize?: number };
 }
@@ -122,7 +120,32 @@ export interface AssetItem {
   mimeType?: string;
 }
 
-export type DrawerKind = 'metadata' | 'collaborator' | 'review' | 'reviewComments' | null;
+export type DrawerKind = 'metadata' | 'collaborator' | 'review' | 'reviewComments' | 'transcripts' | null;
+
+/** A single language's transcript, as returned under content.enrichment.transcripts
+ *  (only populated when the read is made with ?enrich=all). */
+export interface RawTranscript {
+  identifier?: string;
+  code?: string;
+  language: string;
+  languageCode?: string;
+  /** 'Live' | 'Draft' | 'Processing' | 'Failed' - draft/processing/failed are never
+   *  shown to a viewer, only surfaced here for the creator's review. */
+  status?: string;
+  sourceLanguage?: boolean;
+  captionsUrl?: string;
+  artifactUrl?: string;
+  generatedOn?: string;
+  generatedBy?: string;
+}
+
+/** One cue from a transcript's artifactUrl JSON; `id` may be absent on read but must always be sent back on update. */
+export interface TranscriptSegment {
+  id: number;
+  text: string;
+  start?: number;
+  end?: number;
+}
 
 export interface UploadProgress {
   /** 0–100 */

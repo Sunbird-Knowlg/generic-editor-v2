@@ -10,6 +10,7 @@ export type { UseEditorOptions, EditorController, ToastState } from './useEditor
 export type {
   EditorContext, EditorConfig, ContentData, EditorMode, EditorView, DrawerKind,
   UploadProgress, EditorEventPayload, FrameworkCategory, FrameworkTerm,
+  EnrichmentObject, EnrichmentStatus, TranscriptObject,
 } from './types';
 
 /* ---- Services ---- */

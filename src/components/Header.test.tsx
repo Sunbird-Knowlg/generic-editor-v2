@@ -42,29 +42,35 @@ describe('<Header />', () => {
     expect(publish).toHaveBeenCalled();
   });
 
-  it('shows "View transcript" for video content once transcripts exist, and opens the drawer', () => {
-    const setDrawer = vi.fn();
+  it('shows "View transcript" once the content has Transcript objects, and opens the drawer for that type', () => {
+    const openEnrichmentDrawer = vi.fn();
     const ed = makeEd({
-      view: 'player', mode: 'edit', setDrawer, hasTranscripts: true,
+      view: 'player', mode: 'edit', openEnrichmentDrawer, presentEnrichmentTypes: ['Transcript'],
       content: { ...mockContent, mimeType: 'video/mp4' },
     });
     render(<Header ed={ed} />);
     fireEvent.click(screen.getByRole('button', { name: 'View transcript' }));
-    expect(setDrawer).toHaveBeenCalledWith('transcripts');
+    expect(openEnrichmentDrawer).toHaveBeenCalledWith('Transcript');
   });
 
-  it('hides "View transcript" for video content with no transcripts yet (negative)', () => {
+  it('hides "View transcript" when no enrichment type is present (negative)', () => {
     const ed = makeEd({
-      view: 'player', mode: 'edit', hasTranscripts: false,
+      view: 'player', mode: 'edit', presentEnrichmentTypes: [],
       content: { ...mockContent, mimeType: 'video/mp4' },
     });
     render(<Header ed={ed} />);
     expect(screen.queryByRole('button', { name: 'View transcript' })).not.toBeInTheDocument();
   });
 
-  it('hides "View transcript" for non-video content (negative)', () => {
-    const ed = makeEd({ view: 'player', mode: 'edit', content: { ...mockContent, mimeType: 'application/pdf' } });
+  it('skips a present type that has no registry entry (negative)', () => {
+    const ed = makeEd({ view: 'player', mode: 'edit', presentEnrichmentTypes: ['Unknown'] });
     render(<Header ed={ed} />);
     expect(screen.queryByRole('button', { name: 'View transcript' })).not.toBeInTheDocument();
+  });
+
+  it('disables the enrichment button while busy (negative)', () => {
+    const ed = makeEd({ view: 'player', mode: 'edit', busy: true, presentEnrichmentTypes: ['Transcript'] });
+    render(<Header ed={ed} />);
+    expect(screen.getByRole('button', { name: 'View transcript' })).toBeDisabled();
   });
 });

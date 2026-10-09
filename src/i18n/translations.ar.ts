@@ -98,6 +98,7 @@ export const TRANSLATIONS_AR: Record<string, string> = {
   ERROR_FILE_TYPE: 'نوع الملف هذا غير مدعوم.',
   ERROR_FILE_SIZE: 'يتجاوز الملف الحد الأقصى {n} ميغابايت.',
   ERROR_UPLOAD: 'فشل التحميل. يرجى إعادة المحاولة.',
+  ERROR_ENRICHMENT_SAVE: 'تعذّر حفظ طلب النص. أعد الرفع أو حاول لاحقًا.',
   ERROR_LOAD: 'فشل تحميل المحتوى.',
   ERROR_TITLE_REQUIRED: 'العنوان مطلوب.',
   RETRY: 'إعادة المحاولة',

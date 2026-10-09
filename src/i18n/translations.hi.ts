@@ -98,6 +98,7 @@ export const TRANSLATIONS_HI: Record<string, string> = {
   ERROR_FILE_TYPE: 'यह फ़ाइल प्रकार समर्थित नहीं है।',
   ERROR_FILE_SIZE: 'फ़ाइल अधिकतम {n} MB सीमा से अधिक है।',
   ERROR_UPLOAD: 'अपलोड विफल। कृपया पुनः प्रयास करें।',
+  ERROR_ENRICHMENT_SAVE: 'ट्रांसक्रिप्ट अनुरोध सहेजा नहीं जा सका। दोबारा अपलोड करें या बाद में पुनः प्रयास करें।',
   ERROR_LOAD: 'सामग्री लोड करने में विफल।',
   ERROR_TITLE_REQUIRED: 'शीर्षक आवश्यक है।',
   RETRY: 'पुनः प्रयास करें',

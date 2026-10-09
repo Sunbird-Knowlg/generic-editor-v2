@@ -98,6 +98,7 @@ export const TRANSLATIONS_FR: Record<string, string> = {
   ERROR_FILE_TYPE: 'Ce type de fichier n’est pas pris en charge.',
   ERROR_FILE_SIZE: 'Le fichier dépasse la taille maximale de {n} Mo.',
   ERROR_UPLOAD: 'Échec du téléversement. Veuillez réessayer.',
+  ERROR_ENRICHMENT_SAVE: "Impossible d'enregistrer la demande de transcription. Réimportez le fichier ou réessayez plus tard.",
   ERROR_LOAD: 'Échec du chargement du contenu.',
   ERROR_TITLE_REQUIRED: 'Le titre est obligatoire.',
   RETRY: 'Réessayer',

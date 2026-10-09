@@ -1,7 +1,8 @@
 import React, { useRef, useState } from 'react';
 import type { EditorController } from '../useEditor';
 import { t, tf, getCategoryLabel } from '../i18n/i18n';
-import { ACCEPTED_EXTENSIONS, LARGE_UPLOAD_EXTENSIONS, VIDEO_EXTENSIONS } from '../constants';
+import { ACCEPTED_EXTENSIONS, LARGE_UPLOAD_EXTENSIONS } from '../constants';
+import { enrichmentsForFile } from '../services/enrichment/registry';
 import {
   UploadIcon, LinkIcon, CloseIcon, BookIcon, BookClosedIcon, VideoIcon, FileIcon, HelpIcon, AwardIcon, ClipboardIcon,
 } from '../icons';
@@ -38,10 +39,6 @@ function fileExt(f: File): string {
   return f.name.split('.').pop()?.toLowerCase() ?? '';
 }
 
-function isVideoFile(f: File): boolean {
-  return (VIDEO_EXTENSIONS as readonly string[]).includes(fileExt(f));
-}
-
 function fileSizeLabel(bytes: number): string {
   return bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
@@ -56,7 +53,8 @@ const UploadCanvas: React.FC<{ ed: EditorController }> = ({ ed }) => {
   const [dragging, setDragging] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [mode, setMode] = useState<Mode>('file');
-  const [generateTranscripts, setGenerateTranscripts] = useState(true);
+  /** Upload-time enrichment checkboxes for the staged file, by enrichment type. */
+  const [selectedEnrichments, setSelectedEnrichments] = useState<Record<string, boolean>>({});
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   const isUploading = view === 'uploading';
@@ -68,8 +66,8 @@ const UploadCanvas: React.FC<{ ed: EditorController }> = ({ ed }) => {
     ? ['MP4', 'WebM', 'zip', 'Scorm']
     : ['PDF', 'MP4', 'WebM', 'ePub', 'YouTube', 'H5P', 'HTML zip', 'Scorm'];
 
-  /** Validate then auto-upload immediately - except for video, which pauses on a
-   *  "generate transcripts?" confirm step instead (see the render branch below). */
+  /** Validate then auto-upload immediately - except for files an enrichment applies to (video),
+   *  which pause on a confirm step with one checkbox per enrichment (see the render branch below). */
   const stageFile = (f: File) => {
     const ext = f.name.split('.').pop()?.toLowerCase() ?? '';
     if (!(acceptExts as readonly string[]).includes(ext)) {
@@ -82,10 +80,11 @@ const UploadCanvas: React.FC<{ ed: EditorController }> = ({ ed }) => {
     }
     setUploadUrl('');
     setPendingFile(f);
-    if (isVideoFile(f)) {
-      // Default back to checked for every new video staged - otherwise an earlier
-      // uncheck silently carries over to the next video without the user noticing.
-      setGenerateTranscripts(true);
+    const defs = enrichmentsForFile(f);
+    if (defs.length) {
+      // Default back to checked for every new file staged - otherwise an earlier
+      // uncheck silently carries over to the next file without the user noticing.
+      setSelectedEnrichments(Object.fromEntries(defs.map((d) => [d.type, true])));
       return;
     }
     uploadFile(f);
@@ -108,11 +107,14 @@ const UploadCanvas: React.FC<{ ed: EditorController }> = ({ ed }) => {
   const showUrlError = mode === 'link' && !!urlError;
 
   const handleUpload = () => {
-    if (mode === 'file' && pendingFile) uploadFile(pendingFile, isVideoFile(pendingFile) ? generateTranscripts : undefined);
+    if (mode === 'file' && pendingFile) {
+      uploadFile(pendingFile, pendingEnrichments.length ? pendingEnrichments.filter((d) => selectedEnrichments[d.type]).map((d) => d.type) : undefined);
+    }
     else if (mode === 'link' && trimmedUrl) uploadFromUrl(trimmedUrl);
   };
 
-  const pendingIsVideo = mode === 'file' && !!pendingFile && isVideoFile(pendingFile);
+  const pendingEnrichments = mode === 'file' && pendingFile ? enrichmentsForFile(pendingFile) : [];
+  const pendingNeedsConfirm = pendingEnrichments.length > 0;
 
   const canUpload = hasType && ((mode === 'file' && !!pendingFile) || (mode === 'link' && !!trimmedUrl));
 
@@ -149,7 +151,7 @@ const UploadCanvas: React.FC<{ ed: EditorController }> = ({ ed }) => {
 
         {/* Area — source tabs live in its header once a type is picked */}
         <div
-          className={`ce-area${!hasType ? ' ce-area--idle' : ''}${hasType && !isUploading && !largeUpload ? ' has-head' : ''}${dragging ? ' ce-area--drag' : ''}${pendingIsVideo ? ' ce-area--tall' : ''}`}
+          className={`ce-area${!hasType ? ' ce-area--idle' : ''}${hasType && !isUploading && !largeUpload ? ' has-head' : ''}${dragging ? ' ce-area--drag' : ''}${pendingNeedsConfirm ? ' ce-area--tall' : ''}`}
           onDragOver={(e) => { e.preventDefault(); if (hasType && mode === 'file' && !isUploading) setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
@@ -226,7 +228,7 @@ const UploadCanvas: React.FC<{ ed: EditorController }> = ({ ed }) => {
                   </div>
                   {showUrlError && <div className="ce-link-error">{urlError}</div>}
                 </div>
-              ) : pendingIsVideo && pendingFile ? (
+              ) : pendingNeedsConfirm && pendingFile ? (
                 <div className="ce-video-confirm">
                   <div className="ce-file-row">
                     <span className="ce-file-badge">{fileExt(pendingFile).toUpperCase()}</span>
@@ -236,17 +238,21 @@ const UploadCanvas: React.FC<{ ed: EditorController }> = ({ ed }) => {
                     </div>
                   </div>
                   <div className="ce-video-confirm-row">
-                    <label className="ce-transcript-check">
-                      <input
-                        type="checkbox"
-                        checked={generateTranscripts}
-                        onChange={(e) => setGenerateTranscripts(e.target.checked)}
-                      />
-                      <span>
-                        <span className="ce-transcript-check-title">{t(lang, 'GENERATE_TRANSCRIPTS')}</span>
-                        <span className="ce-transcript-check-hint">{t(lang, 'GENERATE_TRANSCRIPTS_HINT')}</span>
-                      </span>
-                    </label>
+                    <div className="ce-enrichment-checks">
+                      {pendingEnrichments.map((d) => (
+                        <label key={d.type} className="ce-enrichment-check">
+                          <input
+                            type="checkbox"
+                            checked={!!selectedEnrichments[d.type]}
+                            onChange={(e) => setSelectedEnrichments((prev) => ({ ...prev, [d.type]: e.target.checked }))}
+                          />
+                          <span>
+                            <span className="ce-enrichment-check-title">{t(lang, d.uploadLabelKey)}</span>
+                            <span className="ce-enrichment-check-hint">{t(lang, d.uploadHintKey)}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
                     <div className="ce-video-confirm-actions">
                       <button type="button" className="ce-link-btn" onClick={() => setPendingFile(null)}>
                         {t(lang, 'REMOVE_FILE')}

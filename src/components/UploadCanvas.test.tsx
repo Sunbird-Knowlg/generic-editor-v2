@@ -48,7 +48,7 @@ describe('<UploadCanvas /> — file auto-upload', () => {
   });
 });
 
-describe('<UploadCanvas /> — video transcript confirm', () => {
+describe('<UploadCanvas /> — enrichment confirm (video)', () => {
   it('does not auto-upload a video file - shows the generate-transcripts confirm step instead', () => {
     const uploadFile = vi.fn();
     const ed = openUpload({ uploadFile });
@@ -60,7 +60,7 @@ describe('<UploadCanvas /> — video transcript confirm', () => {
     expect(screen.getByText(/generate transcripts/i)).toBeInTheDocument();
   });
 
-  it('uploads with generateTranscripts=true by default when confirmed', () => {
+  it('uploads with the Transcript type ticked by default when confirmed', () => {
     const uploadFile = vi.fn();
     const ed = openUpload({ uploadFile });
     const { container } = render(<UploadCanvas ed={ed} />);
@@ -68,10 +68,10 @@ describe('<UploadCanvas /> — video transcript confirm', () => {
     fireEvent.change(input, { target: { files: [fileOf('lecture.webm', 2048, 'video/webm')] } });
     fireEvent.click(screen.getByRole('button', { name: 'Upload' }));
     expect(uploadFile).toHaveBeenCalledTimes(1);
-    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'lecture.webm' }), true);
+    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'lecture.webm' }), ['Transcript']);
   });
 
-  it('uploads with generateTranscripts=false when the checkbox is unchecked', () => {
+  it('uploads with no enrichment types when the checkbox is unchecked', () => {
     const uploadFile = vi.fn();
     const ed = openUpload({ uploadFile });
     const { container } = render(<UploadCanvas ed={ed} />);
@@ -79,10 +79,10 @@ describe('<UploadCanvas /> — video transcript confirm', () => {
     fireEvent.change(input, { target: { files: [fileOf('lecture.mp4', 2048, 'video/mp4')] } });
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: 'Upload' }));
-    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'lecture.mp4' }), false);
+    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'lecture.mp4' }), []);
   });
 
-  it('resets generateTranscripts back to checked for a new video, after unchecking it for a previous one', () => {
+  it('resets the checkbox back to checked for a new video, after unchecking it for a previous one', () => {
     const uploadFile = vi.fn();
     const ed = openUpload({ uploadFile });
     const { container } = render(<UploadCanvas ed={ed} />);
@@ -94,7 +94,29 @@ describe('<UploadCanvas /> — video transcript confirm', () => {
     const freshInput = container.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(freshInput, { target: { files: [fileOf('lecture-2.mp4', 2048, 'video/mp4')] } });
     fireEvent.click(screen.getByRole('button', { name: 'Upload' }));
-    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'lecture-2.mp4' }), true);
+    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'lecture-2.mp4' }), ['Transcript']);
+  });
+
+  it('renders one checkbox, with its label and hint, for the Transcript enrichment', () => {
+    const ed = openUpload();
+    const { container } = render(<UploadCanvas ed={ed} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [fileOf('lecture.mp4', 2048, 'video/mp4')] } });
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    expect(screen.getByText('Generate transcripts for this video')).toBeInTheDocument();
+    expect(screen.getByText('Auto-generates captions after publish')).toBeInTheDocument();
+  });
+
+  it('auto-uploads a non-video file with no second argument and no checkbox (negative)', () => {
+    const uploadFile = vi.fn();
+    const ed = openUpload({ uploadFile });
+    const { container } = render(<UploadCanvas ed={ed} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [fileOf('lesson.pdf', 2048)] } });
+    expect(uploadFile).toHaveBeenCalledTimes(1);
+    expect(uploadFile.mock.calls[0]).toHaveLength(1);
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   });
 
   it('clears the pending video on Remove without uploading', () => {

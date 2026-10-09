@@ -197,6 +197,7 @@ export const TRANSLATIONS_EN: Record<string, string> = {
   ERROR_FILE_TYPE: 'This file type is not supported.',
   ERROR_FILE_SIZE: 'File exceeds the maximum size of {n} MB.',
   ERROR_UPLOAD: 'Upload failed. Please retry.',
+  ERROR_ENRICHMENT_SAVE: "Couldn't save the transcript request. Re-upload or try again later.",
   ERROR_LOAD: 'Failed to load content.',
   ERROR_TITLE_REQUIRED: 'Title is required.',
   RETRY: 'Retry',

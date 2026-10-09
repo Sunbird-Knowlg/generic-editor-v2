@@ -147,3 +147,101 @@ describe('ContentEditorService.readRejectChecklist', () => {
     }
   });
 });
+
+describe('ContentEditorService.listEnrichmentObjects', () => {
+  const okResponse = (objects: unknown[]) => ({ ok: true, status: 200, json: async () => ({ responseCode: 'OK', result: { enrichmentObjects: objects, count: objects.length } }) });
+
+  /** Stubs fetch, builds the service (it binds fetch on construction), runs `fn`, and returns the captured calls. */
+  async function run(
+    impl: (url: string, init?: RequestInit) => unknown,
+    fn: (svc: ContentEditorService) => Promise<void>,
+    config?: ConstructorParameters<typeof ContentEditorService>[0],
+  ) {
+    const savedFetch = globalThis.fetch;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      return impl(url, init);
+    }) as unknown as typeof fetch;
+    try { await fn(new ContentEditorService(config)); } finally { globalThis.fetch = savedFetch; }
+    return calls;
+  }
+
+  it('POSTs {request:{enrichmentObject:{parentId, enrichmentObjectType}}} to the portal slug, not /action', async () => {
+    const calls = await run(() => okResponse([]), async (svc) => { await svc.listEnrichmentObjects('do_1', ['Transcript']); });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('/portal/object/enrichment/v4/list');
+    expect(calls[0].init?.method).toBe('POST');
+    expect(JSON.parse(calls[0].init?.body as string)).toEqual({
+      request: { enrichmentObject: { parentId: 'do_1', enrichmentObjectType: 'Transcript' } },
+    });
+  });
+
+  it('omits enrichmentObjectType when no types are given', async () => {
+    const calls = await run(() => okResponse([]), async (svc) => { await svc.listEnrichmentObjects('do_1'); });
+    expect(JSON.parse(calls[0].init?.body as string)).toEqual({ request: { enrichmentObject: { parentId: 'do_1' } } });
+  });
+
+  it('returns result.enrichmentObjects', async () => {
+    const objects = [{ identifier: 't1', enrichmentObjectType: 'Transcript', parentId: 'do_1', status: 'Live' }];
+    let out: unknown;
+    await run(() => okResponse(objects), async (svc) => { out = await svc.listEnrichmentObjects('do_1', ['Transcript']); });
+    expect(out).toEqual(objects);
+  });
+
+  it('makes one call per type and concatenates the results', async () => {
+    let out: unknown;
+    const calls = await run(
+      (_u, init) => {
+        const type = JSON.parse(init?.body as string).request.enrichmentObject.enrichmentObjectType;
+        return okResponse([{ identifier: `${type}-1` }]);
+      },
+      async (svc) => { out = await svc.listEnrichmentObjects('do_1', ['Transcript', 'Summary']); },
+    );
+    expect(calls).toHaveLength(2);
+    expect(out).toEqual([{ identifier: 'Transcript-1' }, { identifier: 'Summary-1' }]);
+  });
+
+  it('honours a custom portalSlug and baseUrl', async () => {
+    const calls = await run(
+      () => okResponse([]),
+      async (svc) => { await svc.listEnrichmentObjects('do_1', ['Transcript']); },
+      { baseUrl: 'https://gw.example.org/', portalSlug: '/gw' },
+    );
+    expect(calls[0].url).toBe('https://gw.example.org/gw/object/enrichment/v4/list');
+  });
+
+  it('is never served from cache: cache no-store and Cache-Control no-cache', async () => {
+    const calls = await run(() => okResponse([]), async (svc) => { await svc.listEnrichmentObjects('do_1', ['Transcript']); });
+    expect(calls[0].init?.cache).toBe('no-store');
+    expect((calls[0].init?.headers as Record<string, string>)['Cache-Control']).toBe('no-cache');
+  });
+
+  it('returns [] when the result has no enrichmentObjects (negative)', async () => {
+    let out: unknown;
+    await run(
+      () => ({ ok: true, status: 200, json: async () => ({ responseCode: 'OK', result: {} }) }),
+      async (svc) => { out = await svc.listEnrichmentObjects('do_1', ['Transcript']); },
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('throws the backend errmsg on a non-OK responseCode (negative)', async () => {
+    await run(
+      () => ({ ok: false, status: 400, json: async () => ({ responseCode: 'CLIENT_ERROR', params: { errmsg: 'parentId is required.' } }) }),
+      async (svc) => { await expect(svc.listEnrichmentObjects('', ['Transcript'])).rejects.toThrow('parentId is required.'); },
+    );
+  });
+
+  it('treats an unparseable body as a failure (negative)', async () => {
+    await run(
+      () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token <'); } }),
+      async (svc) => { await expect(svc.listEnrichmentObjects('do_1', ['Transcript'])).rejects.toThrow(/Malformed response/); },
+    );
+  });
+
+  it('defaults the list endpoint and supports overriding it', () => {
+    expect(new ContentEditorService().getEndpoints().enrichmentList).toBe('object/enrichment/v4/list');
+    expect(new ContentEditorService({}, { enrichmentList: 'x/list' } as never).getEndpoints().enrichmentList).toBe('x/list');
+  });
+});

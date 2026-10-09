@@ -2,10 +2,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ContentData, DrawerKind, EditorConfig, EditorContext, EditorEventPayload,
-  EditorMode, EditorView, RawTranscript, UploadProgress,
+  EditorMode, EditorView, EnrichmentObject, UploadProgress,
 } from './types';
 import { ContentEditorService } from './services/ContentEditorService';
 import { UploadService, detectFileMime, detectUrlMime } from './services/UploadService';
+import { ENRICHMENT_REGISTRY, enrichmentTypesForMime } from './services/enrichment/registry';
 import { TelemetryService } from './telemetry/TelemetryService';
 import type { TelemetryEvent } from './telemetry/telemetry.types';
 import { t, tf } from './i18n/i18n';
@@ -33,8 +34,6 @@ export interface ToastState {
 }
 
 const REVIEWER_ROLES = ['CONTENT_REVIEWER', 'BOOK_REVIEWER'];
-
-const NO_TRANSCRIPTS: RawTranscript[] = [];
 
 function resolveMode(status: string | undefined, roles: string[] = []): EditorMode {
   const s = (status || STATUS.DRAFT).toLowerCase().trim();
@@ -244,9 +243,26 @@ export function useEditor(opts: UseEditorOptions) {
     [content, service, context, contentType, reload, emit],
   );
 
-  /* ---- Upload a file --- wantTranscripts is the upload-time "generate transcripts?" checkbox value (currently only reported via telemetry/events). */
+  /** Saves the creator's enrichment choices (e.g. ['Transcript']) on the content; the platform generates them after publish.
+   *  Non-fatal: the upload already succeeded, so a failure is reported but never blocks. */
+  const saveEnrichmentTypes = useCallback(
+    async (id: string, fresh: ContentData, types: string[]) => {
+      if (!types.length) return;
+      try {
+        const res = await service.updateContent(id, { enrichmentTypes: types }, fresh.versionKey);
+        // versionKey changes on every update; keep local state current or the next save conflicts.
+        setContent((c) => (c ? { ...c, enrichmentTypes: types, versionKey: res?.versionKey ?? c.versionKey } : c));
+      } catch (err) {
+        telemetry.current?.error(String((err as Error)?.message ?? err), 'enrichmentTypes');
+        showToast(t(lang, 'ERROR_ENRICHMENT_SAVE'), 'error');
+      }
+    },
+    [service, lang, showToast],
+  );
+
+  /* ---- Upload a file --- enrichmentTypes are the types ticked at the upload-time prompt; they are saved on the content right after upload, not deferred to submit-for-review. */
   const uploadFile = useCallback(
-    async (file: File, wantTranscripts?: boolean) => {
+    async (file: File, enrichmentTypes?: string[]) => {
       if (uploadingRef.current) return; // ignore re-entry (double-click / re-drop)
       if (!content?.identifier && !contentType) {
         showToast(t(lang, 'CONTENT_TYPE_REQUIRED'), 'error');
@@ -274,8 +290,8 @@ export function useEditor(opts: UseEditorOptions) {
       setBusyAction('upload');
       setView('uploading');
       setProgress({ percent: 0, bytesUploaded: 0, totalBytes: file.size });
-      emit(EDITOR_EVENTS.UPLOAD_START, { mimeType, size: file.size, generateTranscripts: wantTranscripts });
-      telemetry.current?.interact('click', 'uploadButton', 'upload', { mimeType, generateTranscripts: wantTranscripts });
+      emit(EDITOR_EVENTS.UPLOAD_START, { mimeType, size: file.size, enrichmentTypes });
+      telemetry.current?.interact('click', 'uploadButton', 'upload', { mimeType, enrichmentTypes });
       try {
         const { id } = await ensureContent(mimeType);
         const signed = await uploader.getPresignedUrl(id, file.name);
@@ -285,9 +301,12 @@ export function useEditor(opts: UseEditorOptions) {
         });
         await uploader.finalizeUpload(id, signed, mimeType);
         if (cancelledRef.current) return;
-        await reload(id);
+        const fresh = await reload(id);
         setView('player');
         emit(EDITOR_EVENTS.UPLOAD_COMPLETE, { id });
+        // Only types that apply to the detected mimeType (not just the file extension) are saved.
+        const applicable = enrichmentTypesForMime(mimeType);
+        await saveEnrichmentTypes(id, fresh, (enrichmentTypes ?? []).filter((type) => applicable.includes(type)));
         setUploadSuccess(true);
         setTimeout(() => setUploadSuccess(false), 2500);
       } catch (err) {
@@ -303,7 +322,7 @@ export function useEditor(opts: UseEditorOptions) {
         if (!cancelledRef.current) setProgress(null);
       }
     },
-    [maxMB, largeUpload, contentType, lang, emit, ensureContent, uploader, reload, content, showToast],
+    [maxMB, largeUpload, contentType, lang, emit, ensureContent, uploader, reload, content, showToast, saveEnrichmentTypes],
   );
 
   /* ---- Upload from a URL ---- */
@@ -653,16 +672,66 @@ export function useEditor(opts: UseEditorOptions) {
   /** True when content was rejected and has reviewer suggestions to show. */
   const hasReviewComments = !!(content?.rejectReasons?.length || content?.rejectComment);
 
+  /* ---- Enrichment objects (transcripts, ...): single fetch owner for the list, read once when a published
+     content opens (objects are created after the first publish, so a never-published draft has none and
+     no call is made). The preview, header and drawers read it from here instead of fetching themselves.
+     A retry via reloadEnrichments() refetches without blanking what is already shown. */
+  const [enrichmentObjects, setEnrichmentObjects] = useState<EnrichmentObject[]>([]);
+  const [enrichmentsChecked, setEnrichmentsChecked] = useState(false);
+  const [enrichmentsLoading, setEnrichmentsLoading] = useState(false);
+  const [enrichmentsError, setEnrichmentsError] = useState(false);
+  const [enrichmentsNonce, setEnrichmentsNonce] = useState(0);
+  const [enrichmentDrawerType, setEnrichmentDrawerType] = useState<string | null>(null);
+  const enrichmentsKeyRef = useRef('');
+  useEffect(() => {
+    const key = `${content?.identifier}|${content?.mimeType}|${content?.pkgVersion}`;
+    if (enrichmentsKeyRef.current !== key) {
+      enrichmentsKeyRef.current = key;
+      setEnrichmentObjects([]);
+      setEnrichmentsChecked(false);
+    }
+    setEnrichmentsError(false);
+    const types = enrichmentTypesForMime(content?.mimeType);
+    if (!content?.identifier || !types.length || !content.pkgVersion) {
+      setEnrichmentsLoading(false);
+      setEnrichmentsChecked(true);
+      return;
+    }
+    let cancelled = false;
+    setEnrichmentsLoading(true);
+    service
+      .listEnrichmentObjects(content.identifier, types)
+      .then((list) => { if (!cancelled && mountedRef.current) setEnrichmentObjects(list); })
+      .catch(() => { if (!cancelled && mountedRef.current) { setEnrichmentObjects([]); setEnrichmentsError(true); } })
+      .finally(() => {
+        if (cancelled || !mountedRef.current) return;
+        setEnrichmentsLoading(false);
+        setEnrichmentsChecked(true);
+      });
+    return () => { cancelled = true; };
+  }, [content?.identifier, content?.mimeType, content?.pkgVersion, enrichmentsNonce, service]);
+
+  const reloadEnrichments = useCallback(() => setEnrichmentsNonce((n) => n + 1), []);
+  const openEnrichmentDrawer = useCallback((type: string) => {
+    setEnrichmentDrawerType(type);
+    openDrawer('enrichments');
+  }, [openDrawer]);
+  /** Registered types that currently have at least one object, in registry order. */
+  const presentEnrichmentTypes = useMemo(
+    () => ENRICHMENT_REGISTRY.map((d) => d.type).filter((type) => enrichmentObjects.some((o) => o.enrichmentObjectType === type)),
+    [enrichmentObjects],
+  );
+
   return {
     // state
     content, view, drawer, toast, progress, contentType, uploadUrl, urlError, busy, busyAction, mode, lang, categories,
     maxMB, largeUpload, headerLogo, previewUrl, previewConfig, framework: context.framework,
     userId: context.user?.id, rootOrgId: context.user?.rootOrgId, userRoles: context.user?.roles ?? [],
     reviewErrors, uploadSuccess, sessionExpired, assetPicker, reviewSubmitMode, hasReviewComments,
-    hasTranscripts: false, transcripts: NO_TRANSCRIPTS, transcriptsChecked: true, // inert until the enrichment-object read lands
+    enrichmentObjects, presentEnrichmentTypes, enrichmentsChecked, enrichmentsLoading, enrichmentsError, enrichmentDrawerType,
     // setters
     setDrawer: openDrawer, setContentType, setUploadUrl, setUrlError, showToast, setReviewErrors, setReviewSubmitMode,
-    dismissSessionExpiry, openAssetPicker, closeAssetPicker,
+    dismissSessionExpiry, openAssetPicker, closeAssetPicker, openEnrichmentDrawer, reloadEnrichments,
     // actions
     uploadFile, uploadFromUrl, cancelUpload, saveMetadata, saveMetadataAndSubmit, saveDraft, saveCollaborators,
     validateForReview, validateForReviewAsync, sendForReview, publish, requestChanges, close,

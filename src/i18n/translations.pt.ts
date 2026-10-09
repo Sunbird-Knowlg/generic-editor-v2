@@ -98,6 +98,7 @@ export const TRANSLATIONS_PT: Record<string, string> = {
   ERROR_FILE_TYPE: 'Este tipo de arquivo não é suportado.',
   ERROR_FILE_SIZE: 'O arquivo excede o tamanho máximo de {n} MB.',
   ERROR_UPLOAD: 'Falha no envio. Tente novamente.',
+  ERROR_ENRICHMENT_SAVE: 'Não foi possível salvar o pedido de transcrição. Envie novamente ou tente mais tarde.',
   ERROR_LOAD: 'Falha ao carregar o conteúdo.',
   ERROR_TITLE_REQUIRED: 'O título é obrigatório.',
   RETRY: 'Tentar novamente',

@@ -1,5 +1,5 @@
 /** ContentEditorService — backend abstraction for the editor; calls go to relative `/action/...` (proxied to knowledge-mw/Kong) by default, overridable via EditorConfig. */
-import type { ContentData, EditorContext, EditorConfig, FrameworkCategory, FormField, AssetItem } from '../types';
+import type { ContentData, EditorContext, EditorConfig, FrameworkCategory, FormField, AssetItem, EnrichmentObject } from '../types';
 
 const DEFAULT_ENDPOINTS = {
   /* Versions verified against the portal's ContentService, the old generic editor, and the backend proxy; all hit /action → knowledge-mw. */
@@ -22,6 +22,8 @@ const DEFAULT_ENDPOINTS = {
   userSearch: 'user/v1/search',
   reviewCommentCreate: 'review/comment/v1/create/comment',
   reviewCommentRead: 'review/comment/v1/read/comment',
+  /* Only the gateway (served under portalSlug, not /action) exposes the enrichment object list. */
+  enrichmentList: 'object/enrichment/v4/list',
 } as const;
 
 export type EndpointMap = Partial<typeof DEFAULT_ENDPOINTS>;
@@ -30,7 +32,7 @@ const READ_FIELDS = [
   'name', 'description', 'mimeType', 'contentType', 'primaryCategory', 'resourceType',
   'status', 'artifactUrl', 'streamingUrl', 'downloadUrl', 'appIcon', 'posterImage',
   'framework', 'board', 'medium', 'gradeLevel', 'subject', 'keywords', 'collaborators',
-  'createdBy', 'creator', 'versionKey', 'pkgVersion', 'rejectReasons', 'rejectComment',
+  'createdBy', 'creator', 'versionKey', 'pkgVersion', 'enrichmentTypes', 'rejectReasons', 'rejectComment',
 ].join(',');
 
 function toArray(val: unknown): string[] | undefined {
@@ -108,8 +110,13 @@ export class ContentEditorService {
       body: body !== undefined ? JSON.stringify(body) : undefined,
       ...(opts?.cache ? { cache: opts.cache } : {}),
     });
-    // A malformed/unparseable body must NOT be read as success — every Sunbird action API
-    // returns a JSON envelope, so a parse failure means the write likely never landed.
+    return (await this.readEnvelope<{ result?: T }>(resp, path)).result as T;
+  }
+
+  /** Parses a Sunbird JSON envelope, throwing on a non-OK status, non-OK responseCode or unparseable body.
+   *  A malformed body must NOT be read as success — every Sunbird API returns a JSON envelope, so a
+   *  parse failure means the write likely never landed. */
+  private async readEnvelope<E>(resp: Response, label: string): Promise<E> {
     let data: unknown = {};
     let parseFailed = false;
     try {
@@ -122,15 +129,15 @@ export class ContentEditorService {
       const errmsg =
         (data as { params?: { errmsg?: string; err?: string } }).params?.errmsg ||
         (parseFailed
-          ? `Malformed response (${resp.status}) for ${path}`
-          : `Request failed (${resp.status}) for ${path}`);
+          ? `Malformed response (${resp.status}) for ${label}`
+          : `Request failed (${resp.status}) for ${label}`);
       const err = new Error(errmsg) as Error & { code?: string; status?: number; body?: unknown };
       err.code = (data as { params?: { err?: string } }).params?.err;
       err.status = resp.status;
       err.body = data;
       throw err;
     }
-    return (data as { result?: T }).result as T;
+    return data as E;
   }
 
   /** POST content/v1/create — returns new identifier. */
@@ -193,6 +200,28 @@ export class ContentEditorService {
     return this.request('POST', `${this.ep.review}/${encodeURIComponent(contentId)}`, {
       request: { content: {} },
     });
+  }
+
+  /** POST {portalSlug}/object/enrichment/v4/list — every non-Retired EnrichmentObject under `parentId`, one call per
+   *  type when `types` is given (the endpoint filters by a single type), concatenated. Bypasses this.apiSlug and hits the
+   *  portal proxy, since the route is exposed through the gateway. no-store plus Cache-Control: no-cache (honored by
+   *  Kong's proxy-cache plugin) keep a stale list from hiding objects that just moved to Live. */
+  async listEnrichmentObjects(parentId: string, types?: string[]): Promise<EnrichmentObject[]> {
+    const url = `${this.baseUrl}${this.portalSlug}/${this.ep.enrichmentList}`;
+    const call = async (enrichmentObjectType?: string): Promise<EnrichmentObject[]> => {
+      const resp = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: { ...this.headers, 'Cache-Control': 'no-cache' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({
+          request: { enrichmentObject: { parentId, ...(enrichmentObjectType ? { enrichmentObjectType } : {}) } },
+        }),
+      });
+      const data = await this.readEnvelope<{ result?: { enrichmentObjects?: EnrichmentObject[] } }>(resp, url);
+      return data.result?.enrichmentObjects ?? [];
+    };
+    return types?.length ? (await Promise.all(types.map(call))).flat() : call();
   }
 
   /** POST content/v1/publish/{id} */

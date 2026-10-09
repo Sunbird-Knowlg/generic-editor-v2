@@ -30,7 +30,7 @@ export interface EditorConfig {
   baseUrl?: string;
   /** Path prefix for action APIs; default '/action'. */
   apiSlug?: string;
-  /** Path prefix for the portal's Kong proxy (v1-compat routes like transcript reads); default '/portal'. */
+  /** Path prefix for the portal's Kong proxy (routes only exposed through the gateway, like the enrichment object list); default '/portal'. */
   portalSlug?: string;
   /** Extra headers merged into every request (e.g. auth for standalone use). */
   headers?: Record<string, string>;
@@ -80,6 +80,8 @@ export interface ContentData {
   creator?: string;
   versionKey?: string;
   pkgVersion?: number;
+  /** Enrichment types the creator asked for (e.g. ['Transcript']); the platform generates them after publish. */
+  enrichmentTypes?: string[];
   rejectReasons?: string[];
   rejectComment?: string;
   /** Any extra fields returned by content read. */
@@ -120,26 +122,40 @@ export interface AssetItem {
   mimeType?: string;
 }
 
-export type DrawerKind = 'metadata' | 'collaborator' | 'review' | 'reviewComments' | 'transcripts' | null;
+export type DrawerKind = 'metadata' | 'collaborator' | 'review' | 'reviewComments' | 'enrichments' | null;
 
-/** A single language's transcript, as returned under content.enrichment.transcripts
- *  (only populated when the read is made with ?enrich=all). */
-export interface RawTranscript {
-  identifier?: string;
-  code?: string;
-  language: string;
-  languageCode?: string;
-  /** 'Live' | 'Draft' | 'Processing' | 'Failed' - draft/processing/failed are never
-   *  shown to a viewer, only surfaced here for the creator's review. */
-  status?: string;
-  sourceLanguage?: boolean;
-  captionsUrl?: string;
-  artifactUrl?: string;
-  generatedOn?: string;
+export type EnrichmentStatus = 'Draft' | 'Processing' | 'Review' | 'Live' | 'Failed' | 'Retired';
+
+/** One EnrichmentObject attached to a content, as returned by POST /object/enrichment/v4/list. */
+export interface EnrichmentObject {
+  identifier: string;
+  enrichmentObjectType: string;
+  parentId: string;
+  parentType?: string;
+  status: EnrichmentStatus;
+  channel?: string;
   generatedBy?: string;
+  autoApproved?: boolean;
+  errorMessage?: string;
+  createdOn?: string;
+  lastUpdatedOn?: string;
+  /** Category-specific fields arrive through the category definition overlay. */
+  [key: string]: unknown;
 }
 
-/** One cue from a transcript's artifactUrl JSON; `id` may be absent on read but must always be sent back on update. */
+/** A single language's transcript. Language fields stay empty until generation detects them. */
+export interface TranscriptObject extends EnrichmentObject {
+  enrichmentObjectType: 'Transcript';
+  language?: string;
+  languageCode?: string;
+  sourceLanguage?: boolean;
+  /** transcript.json with the segments. */
+  artifactUrl?: string;
+  /** The VTT the player uses. */
+  captionsUrl?: string;
+}
+
+/** One cue from a transcript's artifactUrl JSON. */
 export interface TranscriptSegment {
   id: number;
   text: string;

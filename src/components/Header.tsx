@@ -2,12 +2,14 @@ import React from 'react';
 import type { EditorController } from '../useEditor';
 import { t } from '../i18n/i18n';
 import {
-  ImageIcon, PencilIcon, SaveIcon, CloseIcon, SendIcon, UserPlusIcon, CheckIcon, CommentIcon, CaptionsIcon,
+  ImageIcon, PencilIcon, SaveIcon, CloseIcon, SendIcon, UserPlusIcon, CheckIcon, CommentIcon,
 } from '../icons';
 import { STATUS } from '../constants';
+import { enrichmentDefinition } from '../services/enrichment/registry';
+import { ENRICHMENT_UI } from './enrichment/enrichmentUi';
 
 const Header: React.FC<{ ed: EditorController }> = ({ ed }) => {
-  const { content, lang, mode, setDrawer, saveDraft, close, busy, busyAction, setReviewErrors, setReviewSubmitMode, headerLogo, hasReviewComments, hasTranscripts } = ed;
+  const { content, lang, mode, setDrawer, saveDraft, close, busy, busyAction, setReviewErrors, setReviewSubmitMode, headerLogo, hasReviewComments, presentEnrichmentTypes, openEnrichmentDrawer } = ed;
   const savingDraft = busyAction === 'save-draft';
   const hasContent = !!content?.identifier && ed.view === 'player';
   const isDraft = (content?.status ?? STATUS.DRAFT) === STATUS.DRAFT;
@@ -61,18 +63,24 @@ const Header: React.FC<{ ed: EditorController }> = ({ ed }) => {
           </button>
         )}
 
-        {hasContent && hasTranscripts && (
-          <button
-            type="button"
-            className="ce-icon-btn"
-            onClick={() => setDrawer('transcripts')}
-            disabled={busy}
-            data-tooltip={t(lang, 'VIEW_TRANSCRIPT')}
-            aria-label={t(lang, 'VIEW_TRANSCRIPT')}
-          >
-            <CaptionsIcon size={16} />
-          </button>
-        )}
+        {hasContent && presentEnrichmentTypes.map((type) => {
+          const def = enrichmentDefinition(type);
+          const ui = ENRICHMENT_UI[type];
+          if (!def || !ui) return null;
+          return (
+            <button
+              key={type}
+              type="button"
+              className="ce-icon-btn"
+              onClick={() => openEnrichmentDrawer(type)}
+              disabled={busy}
+              data-tooltip={t(lang, def.headerLabelKey)}
+              aria-label={t(lang, def.headerLabelKey)}
+            >
+              <ui.icon size={16} />
+            </button>
+          );
+        })}
 
         {canEdit && !isReviewer && hasReviewComments && (
           <button

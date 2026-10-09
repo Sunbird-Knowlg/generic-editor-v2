@@ -1,5 +1,5 @@
 /** ContentEditorService — backend abstraction for the editor; calls go to relative `/action/...` (proxied to knowledge-mw/Kong) by default, overridable via EditorConfig. */
-import type { ContentData, EditorContext, EditorConfig, FrameworkCategory, FormField, AssetItem, RawTranscript } from '../types';
+import type { ContentData, EditorContext, EditorConfig, FrameworkCategory, FormField, AssetItem } from '../types';
 
 const DEFAULT_ENDPOINTS = {
   /* Versions verified against the portal's ContentService, the old generic editor, and the backend proxy; all hit /action → knowledge-mw. */
@@ -22,12 +22,6 @@ const DEFAULT_ENDPOINTS = {
   userSearch: 'user/v1/search',
   reviewCommentCreate: 'review/comment/v1/create/comment',
   reviewCommentRead: 'review/comment/v1/read/comment',
-  transcriptCreate: 'content/v4/enrichment/object/create',
-  transcriptUpdate: 'content/v4/enrichment/object/update',
-  transcriptApprove: 'content/v4/enrichment/object/approve',
-  transcriptReject: 'content/v4/enrichment/object/reject',
-  /* v1, not v3 - only v1+enrich=all via the /portal/* proxy route is confirmed to return enrichment.transcripts (see readTranscripts()'s own comment). */
-  transcriptsRead: 'content/v1/read',
 } as const;
 
 export type EndpointMap = Partial<typeof DEFAULT_ENDPOINTS>;
@@ -199,68 +193,6 @@ export class ContentEditorService {
     return this.request('POST', `${this.ep.review}/${encodeURIComponent(contentId)}`, {
       request: { content: {} },
     });
-  }
-
-  /** POST content/v4/enrichment/object/create/{id} — kicks off async transcript generation. */
-  async createTranscript(contentId: string): Promise<{ identifier?: string; transcriptId?: string; message?: string }> {
-    return this.request('POST', `${this.ep.transcriptCreate}/${encodeURIComponent(contentId)}`, {
-      request: { object: { objectType: 'Transcript' } },
-    });
-  }
-
-  /** PATCH content/v4/enrichment/object/update/{contentId}/{transcriptId} — persists the full segment
-   *  list (the API expects the whole set, not a diff). Callers should send back the original segment
-   *  objects with only the edited fields changed (not a reconstruction), so unrecognized fields the
-   *  parser doesn't know about (Whisper's seek/tokens/... etc.) survive a round-trip - hence `unknown[]`
-   *  rather than `TranscriptSegment[]` here. */
-  async updateTranscript(contentId: string, transcriptId: string, segments: unknown[]): Promise<unknown> {
-    return this.request(
-      'PATCH',
-      `${this.ep.transcriptUpdate}/${encodeURIComponent(contentId)}/${encodeURIComponent(transcriptId)}`,
-      { request: { object: { objectType: 'Transcript', segments } } },
-    );
-  }
-
-  /** POST content/v4/enrichment/object/approve/{contentId}/{transcriptId} — only valid while Review, else 400s with ERR_TRANSCRIPT_NOT_IN_REVIEW. */
-  async approveTranscript(contentId: string, transcriptId: string): Promise<unknown> {
-    return this.request(
-      'POST',
-      `${this.ep.transcriptApprove}/${encodeURIComponent(contentId)}/${encodeURIComponent(transcriptId)}`,
-      { request: { object: { objectType: 'Transcript' } } },
-    );
-  }
-
-  /** POST content/v4/enrichment/object/reject/{contentId}/{transcriptId} — only valid while Review; resets it to Draft. */
-  async rejectTranscript(contentId: string, transcriptId: string): Promise<unknown> {
-    return this.request(
-      'POST',
-      `${this.ep.transcriptReject}/${encodeURIComponent(contentId)}/${encodeURIComponent(transcriptId)}`,
-      { request: { object: { objectType: 'Transcript' } } },
-    );
-  }
-
-  /** GET {portalSlug}/content/v1/read/{id}?enrich=all — bypasses this.apiSlug and hits the portal
-   *  proxy directly (default '/portal', overridable via config.portalSlug), since v1/read+enrich=all
-   *  only works via Kong's proxy, not direct-to-knowledge-mw /action routes. */
-  async readTranscripts(contentId: string): Promise<RawTranscript[]> {
-    const url = `${this.baseUrl}${this.portalSlug}/${this.ep.transcriptsRead}/${encodeURIComponent(contentId)}?fields=identifier&enrich=all`;
-    // no-store (browser-local) + Cache-Control: no-cache (honored by Kong's proxy-cache plugin to
-    // bypass its gateway-level cache) - transcript status changes server-side right after approve/
-    // reject, so either layer serving a cached response here can show a stale status.
-    const resp = await this.fetchImpl(url, {
-      method: 'GET',
-      headers: { ...this.headers, 'Cache-Control': 'no-cache' },
-      credentials: 'same-origin',
-      cache: 'no-store',
-    });
-    let data: { result?: { content?: { enrichment?: { transcripts?: RawTranscript[] } } }; responseCode?: string; params?: { errmsg?: string } } = {};
-    let parseFailed = false;
-    try { data = await resp.json(); } catch { parseFailed = true; }
-    if (!resp.ok || parseFailed || (data.responseCode && data.responseCode !== 'OK' && data.responseCode !== 'ok')) {
-      throw new Error(data?.params?.errmsg
-        || (parseFailed ? `Malformed response (${resp.status}) for ${url}` : `Request failed (${resp.status}) for ${url}`));
-    }
-    return data.result?.content?.enrichment?.transcripts ?? [];
   }
 
   /** POST content/v1/publish/{id} */

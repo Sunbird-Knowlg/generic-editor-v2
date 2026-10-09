@@ -11,7 +11,7 @@ import type { TelemetryEvent } from './telemetry/telemetry.types';
 import { t, tf } from './i18n/i18n';
 import {
   DEFAULT_MAX_FILE_SIZE_MB, DEFAULT_PRIMARY_CATEGORIES, EDITOR_EVENTS,
-  IDLE_TIMEOUT_MS, isVideoMimeType, LARGE_UPLOAD_EXTENSIONS, LARGE_UPLOAD_MAX_MB, STATUS,
+  IDLE_TIMEOUT_MS, LARGE_UPLOAD_EXTENSIONS, LARGE_UPLOAD_MAX_MB, STATUS,
 } from './constants';
 
 export interface UseEditorOptions {
@@ -34,9 +34,7 @@ export interface ToastState {
 
 const REVIEWER_ROLES = ['CONTENT_REVIEWER', 'BOOK_REVIEWER'];
 
-const TRANSCRIPT_POLL_MS = 20000;
-/** ~5 minutes of active (non-hidden) polling - generation is expected to finish well within this. */
-const TRANSCRIPT_POLL_MAX_ATTEMPTS = 15;
+const NO_TRANSCRIPTS: RawTranscript[] = [];
 
 function resolveMode(status: string | undefined, roles: string[] = []): EditorMode {
   const s = (status || STATUS.DRAFT).toLowerCase().trim();
@@ -246,7 +244,7 @@ export function useEditor(opts: UseEditorOptions) {
     [content, service, context, contentType, reload, emit],
   );
 
-  /* ---- Upload a file --- wantTranscripts is the upload-time "generate transcripts?" checkbox value; it fires the API call right after upload completes, not deferred to submit-for-review. */
+  /* ---- Upload a file --- wantTranscripts is the upload-time "generate transcripts?" checkbox value (currently only reported via telemetry/events). */
   const uploadFile = useCallback(
     async (file: File, wantTranscripts?: boolean) => {
       if (uploadingRef.current) return; // ignore re-entry (double-click / re-drop)
@@ -290,13 +288,6 @@ export function useEditor(opts: UseEditorOptions) {
         await reload(id);
         setView('player');
         emit(EDITOR_EVENTS.UPLOAD_COMPLETE, { id });
-        if (wantTranscripts && isVideoMimeType(mimeType)) {
-          // Non-fatal: the upload itself already succeeded - a failed transcript
-          // kickoff shouldn't block or scare the user, just isn't retried here.
-          service.createTranscript(id).catch((err) => {
-            telemetry.current?.error(String((err as Error)?.message ?? err), 'transcript');
-          });
-        }
         setUploadSuccess(true);
         setTimeout(() => setUploadSuccess(false), 2500);
       } catch (err) {
@@ -312,7 +303,7 @@ export function useEditor(opts: UseEditorOptions) {
         if (!cancelledRef.current) setProgress(null);
       }
     },
-    [maxMB, largeUpload, contentType, lang, emit, ensureContent, uploader, reload, content, showToast, service],
+    [maxMB, largeUpload, contentType, lang, emit, ensureContent, uploader, reload, content, showToast],
   );
 
   /* ---- Upload from a URL ---- */
@@ -662,52 +653,13 @@ export function useEditor(opts: UseEditorOptions) {
   /** True when content was rejected and has reviewer suggestions to show. */
   const hasReviewComments = !!(content?.rejectReasons?.length || content?.rejectComment);
 
-  /* ---- Transcripts: single fetch owner for the raw list (EditorPreview/TranscriptsDrawer
-     read it from here instead of each independently re-fetching the same slow ?enrich=all
-     payload). Gates the header's "View transcript" button and feeds the preview's live
-     captions. Polls every 20s until transcripts exist since generation is async - capped
-     at TRANSCRIPT_POLL_MAX_ATTEMPTS so a video that never gets transcripts (box left
-     unchecked, or generation failed) doesn't poll for the rest of the session, and skips
-     the fetch (without stopping the poll) while the tab is hidden. */
-  const [transcripts, setTranscripts] = useState<RawTranscript[]>([]);
-  const [transcriptsChecked, setTranscriptsChecked] = useState(false);
-  const hasTranscripts = transcripts.length > 0;
-  useEffect(() => {
-    setTranscripts([]);
-    setTranscriptsChecked(false);
-    if (!content?.identifier || !isVideoMimeType(content.mimeType)) { setTranscriptsChecked(true); return; }
-    const id = content.identifier;
-    let found = false;
-    let attempts = 0;
-    const check = () => {
-      service
-        .readTranscripts(id)
-        .then((list) => {
-          if (!mountedRef.current || found) return;
-          found = list.length > 0;
-          setTranscripts(list);
-        })
-        .catch(() => { if (mountedRef.current && !found) setTranscripts([]); })
-        .finally(() => { if (mountedRef.current) setTranscriptsChecked(true); });
-    };
-    check();
-    const interval = setInterval(() => {
-      if (found) { clearInterval(interval); return; }
-      attempts += 1;
-      if (attempts > TRANSCRIPT_POLL_MAX_ATTEMPTS) { clearInterval(interval); return; }
-      if (typeof document !== 'undefined' && document.hidden) return;
-      check();
-    }, TRANSCRIPT_POLL_MS);
-    return () => clearInterval(interval);
-  }, [content?.identifier, content?.mimeType, service]);
-
   return {
     // state
     content, view, drawer, toast, progress, contentType, uploadUrl, urlError, busy, busyAction, mode, lang, categories,
     maxMB, largeUpload, headerLogo, previewUrl, previewConfig, framework: context.framework,
     userId: context.user?.id, rootOrgId: context.user?.rootOrgId, userRoles: context.user?.roles ?? [],
     reviewErrors, uploadSuccess, sessionExpired, assetPicker, reviewSubmitMode, hasReviewComments,
-    hasTranscripts, transcripts, transcriptsChecked,
+    hasTranscripts: false, transcripts: NO_TRANSCRIPTS, transcriptsChecked: true, // inert until the enrichment-object read lands
     // setters
     setDrawer: openDrawer, setContentType, setUploadUrl, setUrlError, showToast, setReviewErrors, setReviewSubmitMode,
     dismissSessionExpiry, openAssetPicker, closeAssetPicker,

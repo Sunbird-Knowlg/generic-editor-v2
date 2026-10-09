@@ -2794,28 +2794,6 @@
   color: var(--ce-ink);
 }
 
-.ce-transcript-review-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.ce-transcript-action-error {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.ce-transcript-segment-edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
 .ce-transcript-segment-list {
   display: flex;
   flex-direction: column;
@@ -2843,26 +2821,6 @@
   font-size: 13px;
   color: var(--ce-ink-2);
   line-height: 1.4;
-}
-
-.ce-transcript-segment-input {
-  flex: 1;
-  min-height: 44px;
-  padding: 6px 10px;
-  font-size: 13px;
-  line-height: 1.4;
-  border: 1.5px solid var(--ce-border);
-  border-radius: var(--r-sm, 8px);
-  color: var(--ce-ink);
-  font-family: var(--ce-font);
-  background: var(--ce-white);
-  outline: none;
-  box-sizing: border-box;
-  resize: vertical;
-}
-
-.ce-transcript-segment-input:focus {
-  border-color: var(--ce-primary);
 }
 
 /* Foreign global-reset guard: re-asserts normal text flow to override a sibling package's document-wide element reset (max-inline-size/text-wrap) via higher specificity. */

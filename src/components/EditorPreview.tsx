@@ -5,10 +5,19 @@ import { getMimeTypeLabel, t } from '../i18n/i18n';
 import { FileIcon } from '../icons';
 import { applyEnrichments, enrichmentTypesForMime } from '../services/enrichment/registry';
 
+/** The ECML renderer reads the lesson from `data` (as the portal's EcmlPlayerService passes metadata.body); the API returns the body JSON-stringified. */
+export function rendererData(body: unknown): unknown {
+  if (body && typeof body === 'object') return body;
+  if (typeof body === 'string' && body.trim()) {
+    try { return JSON.parse(body); } catch { return body; }
+  }
+  return {};
+}
+
 /** Preview via the legacy ekstep content renderer (all mimeTypes through its coreplugins), loaded in an iframe and driven via its global `initializePreview()`. */
 const RendererPreview: React.FC<{
-  content: ContentData; context: EditorContext; previewUrl: string; previewConfig: Record<string, unknown>;
-}> = ({ content, context, previewUrl, previewConfig }) => {
+  content: ContentData; context: EditorContext; previewUrl: string; previewConfig: Record<string, unknown>; isDynamicAssess?: boolean;
+}> = ({ content, context, previewUrl, previewConfig, isDynamicAssess = false }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const src = `${previewUrl}${previewUrl.includes('?') ? '&' : '?'}webview=true`;
 
@@ -17,6 +26,9 @@ const RendererPreview: React.FC<{
       | (Window & { initializePreview?: (cfg: unknown) => void })
       | null;
     if (!win || typeof win.initializePreview !== 'function') return;
+    // Only Dynamic Assess renders from its generated body: the whole pool, so the creator and reviewer see every question (learners get their own draw in the portal); other content keeps the renderer's own loading.
+    const data = isDynamicAssess ? rendererData((content as Record<string, unknown>).body) : {};
+    const metadata = content;
     win.initializePreview({
       context: {
         mode: 'edit',
@@ -30,8 +42,8 @@ const RendererPreview: React.FC<{
         partner: [],
       },
       config: previewConfig,
-      metadata: content,
-      data: {},
+      metadata,
+      data,
     });
   };
 
@@ -76,8 +88,10 @@ const EditorPreview: React.FC<{ ed: EditorController; context: EditorContext }> 
           </div>
         ) : (
           <RendererPreview
-            key={`${content.identifier}-${content.artifactUrl ?? ''}-${enrichmentsKey}`}
+            // A regenerated ECML body has no new artifactUrl, so lastUpdatedOn (set by the job) is what remounts the player onto it.
+            key={`${content.identifier}-${content.artifactUrl ?? ''}-${enrichmentsKey}${ed.isDynamicAssess ? `-${String(content.lastUpdatedOn ?? '')}` : ''}`}
             content={previewMetadata}
+            isDynamicAssess={ed.isDynamicAssess}
             context={context}
             previewUrl={previewUrl}
             previewConfig={previewConfig}

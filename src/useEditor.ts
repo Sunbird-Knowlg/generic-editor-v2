@@ -2,19 +2,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ContentData, DrawerKind, EditorConfig, EditorContext, EditorEventPayload,
-  EditorMode, EditorView, RawTranscript, UploadProgress,
+  EditorMode, EditorView, EnrichmentObject, UploadProgress,
 } from './types';
 import { ContentEditorService } from './services/ContentEditorService';
 import { difficultyTargetTotal, toDifficultyTarget } from './difficultyTarget';
 import { generatedSettings, isGenerationStale, needsGeneration, selectedSkills } from './dynamicAssessDraw';
 import { deepestCategoryCode } from './taxonomy';
 import { UploadService, detectFileMime, detectUrlMime } from './services/UploadService';
+import { ENRICHMENT_REGISTRY, enrichmentTypesForMime } from './services/enrichment/registry';
 import { TelemetryService } from './telemetry/TelemetryService';
 import type { TelemetryEvent } from './telemetry/telemetry.types';
 import { t, tf } from './i18n/i18n';
 import {
   DEFAULT_MAX_FILE_SIZE_MB, DEFAULT_PRIMARY_CATEGORIES, EDITOR_EVENTS,
-  IDLE_TIMEOUT_MS, isVideoMimeType, LARGE_UPLOAD_EXTENSIONS, LARGE_UPLOAD_MAX_MB, STATUS,
+  IDLE_TIMEOUT_MS, LARGE_UPLOAD_EXTENSIONS, LARGE_UPLOAD_MAX_MB, STATUS,
 } from './constants';
 
 export interface UseEditorOptions {
@@ -36,10 +37,6 @@ export interface ToastState {
 }
 
 const REVIEWER_ROLES = ['CONTENT_REVIEWER', 'BOOK_REVIEWER'];
-
-const TRANSCRIPT_POLL_MS = 20000;
-/** ~5 minutes of active (non-hidden) polling - generation is expected to finish well within this. */
-const TRANSCRIPT_POLL_MAX_ATTEMPTS = 15;
 
 /** refresh-body polling: faster and shorter than transcript polling since the job write is quicker. */
 const DYNAMIC_ASSESS_POLL_MS = 3000;
@@ -325,9 +322,27 @@ export function useEditor(opts: UseEditorOptions) {
     [content, service, context, contentType, reload, emit],
   );
 
-  /* ---- Upload a file --- wantTranscripts is the upload-time "generate transcripts?" checkbox value; it fires the API call right after upload completes, not deferred to submit-for-review. */
+  /** Saves the creator's enrichment choices (e.g. ['Transcript']) on the content; the platform generates them after publish.
+   *  An empty list still writes when earlier types are saved, so unticking (or replacing the file with one the type
+   *  doesn't apply to) clears them. Non-fatal: the upload already succeeded, so a failure is reported but never blocks. */
+  const saveEnrichmentTypes = useCallback(
+    async (id: string, fresh: ContentData, types: string[]) => {
+      if (!types.length && !fresh.enrichmentTypes?.length) return;
+      try {
+        const res = await service.updateContent(id, { enrichmentTypes: types }, fresh.versionKey);
+        // versionKey changes on every update; keep local state current or the next save conflicts.
+        setContent((c) => (c ? { ...c, enrichmentTypes: types, versionKey: res?.versionKey ?? c.versionKey } : c));
+      } catch (err) {
+        telemetry.current?.error(String((err as Error)?.message ?? err), 'enrichmentTypes');
+        showToast(t(lang, 'ERROR_ENRICHMENT_SAVE'), 'error');
+      }
+    },
+    [service, lang, showToast],
+  );
+
+  /* ---- Upload a file --- enrichmentTypes are the types ticked at the upload-time prompt; they are saved on the content right after upload, not deferred to submit-for-review. */
   const uploadFile = useCallback(
-    async (file: File, wantTranscripts?: boolean) => {
+    async (file: File, enrichmentTypes?: string[]) => {
       if (uploadingRef.current) return; // ignore re-entry (double-click / re-drop)
       if (!content?.identifier && !contentType) {
         showToast(t(lang, 'CONTENT_TYPE_REQUIRED'), 'error');
@@ -355,8 +370,8 @@ export function useEditor(opts: UseEditorOptions) {
       setBusyAction('upload');
       setView('uploading');
       setProgress({ percent: 0, bytesUploaded: 0, totalBytes: file.size });
-      emit(EDITOR_EVENTS.UPLOAD_START, { mimeType, size: file.size, generateTranscripts: wantTranscripts });
-      telemetry.current?.interact('click', 'uploadButton', 'upload', { mimeType, generateTranscripts: wantTranscripts });
+      emit(EDITOR_EVENTS.UPLOAD_START, { mimeType, size: file.size, enrichmentTypes });
+      telemetry.current?.interact('click', 'uploadButton', 'upload', { mimeType, enrichmentTypes });
       try {
         const { id } = await ensureContent(mimeType);
         const signed = await uploader.getPresignedUrl(id, file.name);
@@ -366,16 +381,12 @@ export function useEditor(opts: UseEditorOptions) {
         });
         await uploader.finalizeUpload(id, signed, mimeType);
         if (cancelledRef.current) return;
-        await reload(id);
+        const fresh = await reload(id);
         setView('player');
         emit(EDITOR_EVENTS.UPLOAD_COMPLETE, { id });
-        if (wantTranscripts && isVideoMimeType(mimeType)) {
-          // Non-fatal: the upload itself already succeeded - a failed transcript
-          // kickoff shouldn't block or scare the user, just isn't retried here.
-          service.createTranscript(id).catch((err) => {
-            telemetry.current?.error(String((err as Error)?.message ?? err), 'transcript');
-          });
-        }
+        // Only types that apply to the detected mimeType (not just the file extension) are saved.
+        const applicable = enrichmentTypesForMime(mimeType);
+        await saveEnrichmentTypes(id, fresh, (enrichmentTypes ?? []).filter((type) => applicable.includes(type)));
         setUploadSuccess(true);
         setTimeout(() => setUploadSuccess(false), 2500);
       } catch (err) {
@@ -391,7 +402,7 @@ export function useEditor(opts: UseEditorOptions) {
         if (!cancelledRef.current) setProgress(null);
       }
     },
-    [maxMB, largeUpload, contentType, lang, emit, ensureContent, uploader, reload, content, showToast, service],
+    [maxMB, largeUpload, contentType, lang, emit, ensureContent, uploader, reload, content, showToast, saveEnrichmentTypes],
   );
 
   /* ---- Upload from a URL ---- */
@@ -417,9 +428,11 @@ export function useEditor(opts: UseEditorOptions) {
         const { id } = await ensureContent(mimeType);
         await uploader.finalizeUrl(id, link, mimeType);
         if (cancelledRef.current) return;
-        await reload(id);
+        const fresh = await reload(id);
         setView('player');
         emit(EDITOR_EVENTS.UPLOAD_COMPLETE, { id });
+        // A URL source (YouTube, ...) never takes an enrichment, so drop any saved from a previous file.
+        await saveEnrichmentTypes(id, fresh, []);
         setUploadSuccess(true);
         setTimeout(() => setUploadSuccess(false), 2500);
       } catch (err) {
@@ -442,7 +455,7 @@ export function useEditor(opts: UseEditorOptions) {
         setBusyAction(null);
       }
     },
-    [contentType, lang, emit, ensureContent, uploader, reload, content, showToast],
+    [contentType, lang, emit, ensureContent, uploader, reload, content, showToast, saveEnrichmentTypes],
   );
 
   /* ---- Cancel an in-flight upload (soft: resets UI; late finish is ignored) ---- */
@@ -853,44 +866,59 @@ export function useEditor(opts: UseEditorOptions) {
   }, [content, service, lang, showToast, context.user?.id]);
   generateRef.current = refreshBody;
 
-  /* ---- Transcripts: single fetch owner for the raw list (EditorPreview/TranscriptsDrawer
-     read it from here instead of each independently re-fetching the same slow ?enrich=all
-     payload). Gates the header's "View transcript" button and feeds the preview's live
-     captions. Polls every 20s until transcripts exist since generation is async - capped
-     at TRANSCRIPT_POLL_MAX_ATTEMPTS so a video that never gets transcripts (box left
-     unchecked, or generation failed) doesn't poll for the rest of the session, and skips
-     the fetch (without stopping the poll) while the tab is hidden. */
-  const [transcripts, setTranscripts] = useState<RawTranscript[]>([]);
-  const [transcriptsChecked, setTranscriptsChecked] = useState(false);
-  const hasTranscripts = transcripts.length > 0;
+  /* ---- Enrichment objects (transcripts, ...): single fetch owner for the list, read once when a published
+     content opens (objects are created after the first publish, so a never-published draft has none and
+     no call is made). The preview, header and drawers read it from here instead of fetching themselves.
+     A retry via reloadEnrichments() refetches without blanking what is already shown. */
+  const [enrichmentObjects, setEnrichmentObjects] = useState<EnrichmentObject[]>([]);
+  /** Key of the content whose first list check has settled; compared to the current key so the flag is false on the very render a new content arrives. */
+  const [checkedKey, setCheckedKey] = useState('');
+  const [enrichmentsLoading, setEnrichmentsLoading] = useState(false);
+  const [enrichmentsError, setEnrichmentsError] = useState(false);
+  const [enrichmentsNonce, setEnrichmentsNonce] = useState(0);
+  const [enrichmentDrawerType, setEnrichmentDrawerType] = useState<string | null>(null);
+  const enrichmentsKeyRef = useRef('');
+  const contentKey = `${content?.identifier}|${content?.mimeType}|${content?.pkgVersion}`;
+  const enrichmentsChecked = checkedKey === contentKey;
   useEffect(() => {
-    setTranscripts([]);
-    setTranscriptsChecked(false);
-    if (!content?.identifier || !isVideoMimeType(content.mimeType)) { setTranscriptsChecked(true); return; }
-    const id = content.identifier;
-    let found = false;
-    let attempts = 0;
-    const check = () => {
-      service
-        .readTranscripts(id)
-        .then((list) => {
-          if (!mountedRef.current || found) return;
-          found = list.length > 0;
-          setTranscripts(list);
-        })
-        .catch(() => { if (mountedRef.current && !found) setTranscripts([]); })
-        .finally(() => { if (mountedRef.current) setTranscriptsChecked(true); });
-    };
-    check();
-    const interval = setInterval(() => {
-      if (found) { clearInterval(interval); return; }
-      attempts += 1;
-      if (attempts > TRANSCRIPT_POLL_MAX_ATTEMPTS) { clearInterval(interval); return; }
-      if (typeof document !== 'undefined' && document.hidden) return;
-      check();
-    }, TRANSCRIPT_POLL_MS);
-    return () => clearInterval(interval);
-  }, [content?.identifier, content?.mimeType, service]);
+    const key = contentKey;
+    if (enrichmentsKeyRef.current !== key) {
+      enrichmentsKeyRef.current = key;
+      setEnrichmentObjects([]);
+    }
+    setEnrichmentsError(false);
+    const types = enrichmentTypesForMime(content?.mimeType);
+    if (!content?.identifier || !types.length || !content.pkgVersion) {
+      setEnrichmentsLoading(false);
+      setCheckedKey(key);
+      return;
+    }
+    let cancelled = false;
+    setEnrichmentsLoading(true);
+    service
+      .listEnrichmentObjects(content.identifier, types)
+      .then((list) => { if (!cancelled && mountedRef.current) setEnrichmentObjects(list); })
+      .catch(() => { if (!cancelled && mountedRef.current) setEnrichmentsError(true); })
+      .finally(() => {
+        if (cancelled || !mountedRef.current) return;
+        setEnrichmentsLoading(false);
+        setCheckedKey(key);
+      });
+    return () => { cancelled = true; };
+  }, [contentKey, content?.identifier, content?.mimeType, content?.pkgVersion, enrichmentsNonce, service]);
+
+  const reloadEnrichments = useCallback(() => setEnrichmentsNonce((n) => n + 1), []);
+  const openEnrichmentDrawer = useCallback((type: string) => {
+    setEnrichmentDrawerType(type);
+    openDrawer('enrichments');
+  }, [openDrawer]);
+  /** Registered types that currently have at least one object, in registry order. After a failed load, the types the
+   *  content requested stay listed so the header button still opens the drawer's error and Retry. */
+  const presentEnrichmentTypes = useMemo(
+    () => ENRICHMENT_REGISTRY.map((d) => d.type).filter((type) =>
+      enrichmentObjects.some((o) => o.enrichmentObjectType === type) || (enrichmentsError && !!content?.enrichmentTypes?.includes(type))),
+    [enrichmentObjects, enrichmentsError, content?.enrichmentTypes],
+  );
 
   return {
     // state
@@ -898,11 +926,11 @@ export function useEditor(opts: UseEditorOptions) {
     maxMB, largeUpload, headerLogo, previewUrl, previewConfig, framework: context.framework,
     userId: context.user?.id, rootOrgId: context.user?.rootOrgId, userRoles: context.user?.roles ?? [],
     reviewErrors, uploadSuccess, sessionExpired, assetPicker, reviewSubmitMode, hasReviewComments,
-    hasTranscripts, transcripts, transcriptsChecked,
+    enrichmentObjects, presentEnrichmentTypes, enrichmentsChecked, enrichmentsLoading, enrichmentsError, enrichmentDrawerType,
     isDynamicAssess, hasGeneratedBody, dynamicAssessRefreshing, dynamicAssessStale,
     // setters
     setDrawer: openDrawer, setContentType, setUploadUrl, setUrlError, showToast, setReviewErrors, setReviewSubmitMode,
-    dismissSessionExpiry, openAssetPicker, closeAssetPicker,
+    dismissSessionExpiry, openAssetPicker, closeAssetPicker, openEnrichmentDrawer, reloadEnrichments,
     // actions
     uploadFile, uploadFromUrl, cancelUpload, saveMetadata, saveMetadataAndSubmit, saveDraft, saveCollaborators,
     validateForReview, validateForReviewAsync, sendForReview, publish, requestChanges, close, refreshBody,

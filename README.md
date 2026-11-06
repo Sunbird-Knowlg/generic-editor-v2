@@ -181,6 +181,7 @@ You can also override per-load via URL query params: `?contentId=do_123&lang=hi&
 | **Review workflow** | Send for review, reviewer request-changes (with reasons checklist), publish. |
 | **Locking** | Creates a content lock on upload / edit-open; retires it on close and on send-for-review. |
 | **Session guard** | 30-minute inactivity prompt (Continue / Close). |
+| **Enrichments** | Ticking "Generate transcripts" when uploading a video saves `enrichmentTypes` on the content; the platform generates transcripts after publish. A published video's transcripts show in a read-only drawer and as preview captions, read via `POST /object/enrichment/v4/list` (served under `config.portalSlug`, default `/portal`). |
 | **Telemetry** | Emits Sunbird 3.0 telemetry (impression / interact / error / end) via `onTelemetryEvent`. |
 | **Preview** | Renders through the ekstep content renderer for every supported mimeType. |
 

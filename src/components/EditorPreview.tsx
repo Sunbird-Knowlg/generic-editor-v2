@@ -56,7 +56,7 @@ const EditorPreview: React.FC<{ ed: EditorController; context: EditorContext }> 
   const previewMetadata = applyEnrichments(content, enrichmentObjects);
   // The iframe key changes only when the actual Live set changes (not just its count), so a
   // same-count swap (one object leaves Live as another joins) still remounts.
-  const enrichmentsKey = enrichmentObjects.filter((o) => o.status === 'Live').map((o) => o.identifier).sort().join(',');
+  const enrichmentsKey = enrichmentObjects.filter((o) => o.status === 'Live').map((o) => `${o.identifier}:${String(o.captionsUrl ?? '')}`).sort().join(',');
 
   return (
     <div className="ce-preview-card">

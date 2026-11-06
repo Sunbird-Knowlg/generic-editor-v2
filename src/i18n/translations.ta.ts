@@ -177,7 +177,6 @@ export const TRANSLATIONS_TA: Record<string, string> = {
   TIME_HOURS_AGO: '{n} மணி நேரத்திற்கு முன்',
   TIME_DAY_AGO: '{n} நாளுக்கு முன்',
   TIME_DAYS_AGO: '{n} நாட்களுக்கு முன்',
-  TRANSLATIONS_PENDING_NOTE: 'மூல மொழி டிரான்ஸ்கிரிப்ட் தயாரானவுடன் மற்ற மொழிகளுக்கான மொழிபெயர்ப்புகள் தோன்றும். இதற்கு சில நிமிடங்கள் ஆகலாம்.',
   STATUS_LIVE: 'லைவ்',
   STATUS_NEEDS_REVIEW: 'மதிப்பாய்வு தேவை',
   STATUS_PROCESSING: 'செயலாக்கத்தில் உள்ளது',

@@ -45,8 +45,12 @@ const TranscriptSegmentsView: React.FC<{ lang: string; transcript: TranscriptObj
     setSegments(null);
     setError(false);
     setLoading(true);
-    fetch(transcript.artifactUrl as string)
-      .then((r) => r.json())
+    const controller = new AbortController();
+    fetch(transcript.artifactUrl as string, { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error(`Segments request failed (${r.status})`);
+        return r.json();
+      })
       .then((json) => {
         if (requestRef.current !== token) return;
         const parsed = parseSegments(json);
@@ -55,7 +59,7 @@ const TranscriptSegmentsView: React.FC<{ lang: string; transcript: TranscriptObj
       })
       .catch(() => { if (requestRef.current === token) setError(true); })
       .finally(() => { if (requestRef.current === token) setLoading(false); });
-    return () => { requestRef.current += 1; };
+    return () => { requestRef.current += 1; controller.abort(); };
   }, [transcript.artifactUrl]);
 
   return (

@@ -221,7 +221,12 @@ export class ContentEditorService {
       const data = await this.readEnvelope<{ result?: { enrichmentObjects?: EnrichmentObject[] } }>(resp, url);
       return data.result?.enrichmentObjects ?? [];
     };
-    return types?.length ? (await Promise.all(types.map(call))).flat() : call();
+    if (!types?.length) return call();
+    // One type failing must not discard the others; only a total failure rejects.
+    const settled = await Promise.allSettled(types.map(call));
+    const failed = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failed && settled.every((r) => r.status === 'rejected')) throw failed.reason;
+    return settled.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
   }
 
   /** POST content/v1/publish/{id} */

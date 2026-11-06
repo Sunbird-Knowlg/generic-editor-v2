@@ -14,7 +14,7 @@ const EnrichmentsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
   const ui = type ? ENRICHMENT_UI[type] : undefined;
   const Icon = ui?.icon ?? CaptionsIcon;
 
-  const body = !ui || !type ? null : enrichmentsLoading ? (
+  const body = !ui || !type ? null : enrichmentsLoading && enrichmentObjects.length === 0 ? (
     <div className="ce-center" style={{ padding: 40 }}>
       <div className="ce-spinner ce-spinner--sm" />
     </div>

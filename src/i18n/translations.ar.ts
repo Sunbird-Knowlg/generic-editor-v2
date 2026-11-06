@@ -177,7 +177,6 @@ export const TRANSLATIONS_AR: Record<string, string> = {
   TIME_HOURS_AGO: 'قبل {n} ساعة',
   TIME_DAY_AGO: 'قبل {n} يوم',
   TIME_DAYS_AGO: 'قبل {n} أيام',
-  TRANSLATIONS_PENDING_NOTE: 'ستظهر ترجمات اللغات الأخرى بمجرد جهوز نص اللغة المصدر. قد يستغرق ذلك بضع دقائق.',
   STATUS_LIVE: 'مباشر',
   STATUS_NEEDS_REVIEW: 'بحاجة إلى مراجعة',
   STATUS_PROCESSING: 'قيد المعالجة',

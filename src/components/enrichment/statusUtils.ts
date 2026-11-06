@@ -23,7 +23,7 @@ export function statusLabel(lang: string, status?: string): string {
     case 'Processing': return t(lang, 'STATUS_PROCESSING');
     case 'Live': return t(lang, 'STATUS_LIVE');
     case 'Failed': return t(lang, 'STATUS_FAILED');
-    default: return status || t(lang, 'STATUS_NEEDS_REVIEW');
+    default: return status || t(lang, 'STATUS_DRAFT');
   }
 }
 

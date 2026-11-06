@@ -177,7 +177,6 @@ export const TRANSLATIONS_HI: Record<string, string> = {
   TIME_HOURS_AGO: '{n} घंटे पहले',
   TIME_DAY_AGO: '{n} दिन पहले',
   TIME_DAYS_AGO: '{n} दिन पहले',
-  TRANSLATIONS_PENDING_NOTE: 'स्रोत भाषा की ट्रांसक्रिप्ट तैयार होते ही अन्य भाषाओं के अनुवाद दिखाई देंगे। इसमें कुछ मिनट लग सकते हैं।',
   STATUS_LIVE: 'लाइव',
   STATUS_NEEDS_REVIEW: 'समीक्षा आवश्यक',
   STATUS_PROCESSING: 'प्रोसेस हो रहा है',

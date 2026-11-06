@@ -106,15 +106,15 @@ const UploadCanvas: React.FC<{ ed: EditorController }> = ({ ed }) => {
   const trimmedUrl = uploadUrl.trim();
   const showUrlError = mode === 'link' && !!urlError;
 
-  const handleUpload = () => {
-    if (mode === 'file' && pendingFile) {
-      uploadFile(pendingFile, pendingEnrichments.length ? pendingEnrichments.filter((d) => selectedEnrichments[d.type]).map((d) => d.type) : undefined);
-    }
-    else if (mode === 'link' && trimmedUrl) uploadFromUrl(trimmedUrl);
-  };
-
   const pendingEnrichments = mode === 'file' && pendingFile ? enrichmentsForFile(pendingFile) : [];
   const pendingNeedsConfirm = pendingEnrichments.length > 0;
+
+  const handleUpload = () => {
+    if (mode === 'file' && pendingFile) {
+      const chosen = pendingEnrichments.filter((d) => selectedEnrichments[d.type]).map((d) => d.type);
+      uploadFile(pendingFile, pendingNeedsConfirm ? chosen : undefined);
+    } else if (mode === 'link' && trimmedUrl) uploadFromUrl(trimmedUrl);
+  };
 
   const canUpload = hasType && ((mode === 'file' && !!pendingFile) || (mode === 'link' && !!trimmedUrl));
 

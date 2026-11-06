@@ -35,11 +35,6 @@ const TranscriptPanel: React.FC<EnrichmentPanelProps> = ({ objects, ed }) => {
 
   return (
     <>
-      {transcripts.every((tr) => tr.sourceLanguage) && (
-        // No translated languages exist yet - set the expectation up front instead
-        // of leaving the source-only list looking like translation was skipped.
-        <p className="ce-transcripts-note">{t(lang, 'TRANSLATIONS_PENDING_NOTE')}</p>
-      )}
       <div className="ce-label-sm" style={{ marginBottom: 10 }}>{t(lang, 'LANGUAGES_LABEL')}</div>
       <div className="ce-transcript-list">
         {sorted.map((tr) => {

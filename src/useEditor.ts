@@ -244,10 +244,11 @@ export function useEditor(opts: UseEditorOptions) {
   );
 
   /** Saves the creator's enrichment choices (e.g. ['Transcript']) on the content; the platform generates them after publish.
-   *  Non-fatal: the upload already succeeded, so a failure is reported but never blocks. */
+   *  An empty list still writes when earlier types are saved, so unticking (or replacing the file with one the type
+   *  doesn't apply to) clears them. Non-fatal: the upload already succeeded, so a failure is reported but never blocks. */
   const saveEnrichmentTypes = useCallback(
     async (id: string, fresh: ContentData, types: string[]) => {
-      if (!types.length) return;
+      if (!types.length && !fresh.enrichmentTypes?.length) return;
       try {
         const res = await service.updateContent(id, { enrichmentTypes: types }, fresh.versionKey);
         // versionKey changes on every update; keep local state current or the next save conflicts.
@@ -348,9 +349,11 @@ export function useEditor(opts: UseEditorOptions) {
         const { id } = await ensureContent(mimeType);
         await uploader.finalizeUrl(id, link, mimeType);
         if (cancelledRef.current) return;
-        await reload(id);
+        const fresh = await reload(id);
         setView('player');
         emit(EDITOR_EVENTS.UPLOAD_COMPLETE, { id });
+        // A URL source (YouTube, ...) never takes an enrichment, so drop any saved from a previous file.
+        await saveEnrichmentTypes(id, fresh, []);
         setUploadSuccess(true);
         setTimeout(() => setUploadSuccess(false), 2500);
       } catch (err) {
@@ -373,7 +376,7 @@ export function useEditor(opts: UseEditorOptions) {
         setBusyAction(null);
       }
     },
-    [contentType, lang, emit, ensureContent, uploader, reload, content, showToast],
+    [contentType, lang, emit, ensureContent, uploader, reload, content, showToast, saveEnrichmentTypes],
   );
 
   /* ---- Cancel an in-flight upload (soft: resets UI; late finish is ignored) ---- */
@@ -677,24 +680,26 @@ export function useEditor(opts: UseEditorOptions) {
      no call is made). The preview, header and drawers read it from here instead of fetching themselves.
      A retry via reloadEnrichments() refetches without blanking what is already shown. */
   const [enrichmentObjects, setEnrichmentObjects] = useState<EnrichmentObject[]>([]);
-  const [enrichmentsChecked, setEnrichmentsChecked] = useState(false);
+  /** Key of the content whose first list check has settled; compared to the current key so the flag is false on the very render a new content arrives. */
+  const [checkedKey, setCheckedKey] = useState('');
   const [enrichmentsLoading, setEnrichmentsLoading] = useState(false);
   const [enrichmentsError, setEnrichmentsError] = useState(false);
   const [enrichmentsNonce, setEnrichmentsNonce] = useState(0);
   const [enrichmentDrawerType, setEnrichmentDrawerType] = useState<string | null>(null);
   const enrichmentsKeyRef = useRef('');
+  const contentKey = `${content?.identifier}|${content?.mimeType}|${content?.pkgVersion}`;
+  const enrichmentsChecked = checkedKey === contentKey;
   useEffect(() => {
-    const key = `${content?.identifier}|${content?.mimeType}|${content?.pkgVersion}`;
+    const key = contentKey;
     if (enrichmentsKeyRef.current !== key) {
       enrichmentsKeyRef.current = key;
       setEnrichmentObjects([]);
-      setEnrichmentsChecked(false);
     }
     setEnrichmentsError(false);
     const types = enrichmentTypesForMime(content?.mimeType);
     if (!content?.identifier || !types.length || !content.pkgVersion) {
       setEnrichmentsLoading(false);
-      setEnrichmentsChecked(true);
+      setCheckedKey(key);
       return;
     }
     let cancelled = false;
@@ -702,24 +707,26 @@ export function useEditor(opts: UseEditorOptions) {
     service
       .listEnrichmentObjects(content.identifier, types)
       .then((list) => { if (!cancelled && mountedRef.current) setEnrichmentObjects(list); })
-      .catch(() => { if (!cancelled && mountedRef.current) { setEnrichmentObjects([]); setEnrichmentsError(true); } })
+      .catch(() => { if (!cancelled && mountedRef.current) setEnrichmentsError(true); })
       .finally(() => {
         if (cancelled || !mountedRef.current) return;
         setEnrichmentsLoading(false);
-        setEnrichmentsChecked(true);
+        setCheckedKey(key);
       });
     return () => { cancelled = true; };
-  }, [content?.identifier, content?.mimeType, content?.pkgVersion, enrichmentsNonce, service]);
+  }, [contentKey, content?.identifier, content?.mimeType, content?.pkgVersion, enrichmentsNonce, service]);
 
   const reloadEnrichments = useCallback(() => setEnrichmentsNonce((n) => n + 1), []);
   const openEnrichmentDrawer = useCallback((type: string) => {
     setEnrichmentDrawerType(type);
     openDrawer('enrichments');
   }, [openDrawer]);
-  /** Registered types that currently have at least one object, in registry order. */
+  /** Registered types that currently have at least one object, in registry order. After a failed load, the types the
+   *  content requested stay listed so the header button still opens the drawer's error and Retry. */
   const presentEnrichmentTypes = useMemo(
-    () => ENRICHMENT_REGISTRY.map((d) => d.type).filter((type) => enrichmentObjects.some((o) => o.enrichmentObjectType === type)),
-    [enrichmentObjects],
+    () => ENRICHMENT_REGISTRY.map((d) => d.type).filter((type) =>
+      enrichmentObjects.some((o) => o.enrichmentObjectType === type) || (enrichmentsError && !!content?.enrichmentTypes?.includes(type))),
+    [enrichmentObjects, enrichmentsError, content?.enrichmentTypes],
   );
 
   return {

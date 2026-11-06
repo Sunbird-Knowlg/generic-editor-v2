@@ -58,16 +58,6 @@ describe('<TranscriptPanel />', () => {
     expect(screen.queryByText('stale error')).not.toBeInTheDocument();
   });
 
-  it('shows a note that other languages will appear once the source transcript is ready, when only the source exists', () => {
-    render(panel([tr({ identifier: 't_en', language: 'English', status: 'Review', sourceLanguage: true })]));
-    expect(screen.getByText(/Translations for other languages will appear/)).toBeInTheDocument();
-  });
-
-  it('does not show the translations-pending note once other languages exist (negative)', () => {
-    render(panel(TRANSCRIPTS));
-    expect(screen.queryByText(/Translations for other languages will appear/)).not.toBeInTheDocument();
-  });
-
   it('shows an empty state when there are no transcripts yet (negative)', () => {
     render(panel([]));
     expect(screen.getByText('No transcripts yet')).toBeInTheDocument();
@@ -94,6 +84,7 @@ describe('<TranscriptPanel />', () => {
 
     it('fetches artifactUrl and renders timestamped segments on "View segments"', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
         json: async () => ({ segments: [{ start: 0, end: 2.5, text: 'Hello there.' }, { start: 2.5, end: 5, text: 'Welcome.' }] }),
       }));
       render(panel(TRANSCRIPTS));
@@ -101,11 +92,11 @@ describe('<TranscriptPanel />', () => {
       expect(await screen.findByText('Hello there.')).toBeInTheDocument();
       expect(screen.getByText('Welcome.')).toBeInTheDocument();
       expect(screen.getByText('0:00–0:02')).toBeInTheDocument();
-      expect(fetch).toHaveBeenCalledWith('https://x/en.json');
+      expect(fetch).toHaveBeenCalledWith('https://x/en.json', expect.objectContaining({ signal: expect.anything() }));
     });
 
     it('renders segments read-only, with no textarea or edit/save controls (negative)', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ segments: [{ text: 'Hi.' }] }) }));
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ segments: [{ text: 'Hi.' }] }) }));
       render(panel(TRANSCRIPTS));
       fireEvent.click(screen.getAllByRole('button', { name: 'View segments' })[0]);
       await screen.findByText('Hi.');
@@ -115,10 +106,18 @@ describe('<TranscriptPanel />', () => {
     });
 
     it('shows a load-error state when the JSON shape is unrecognized (negative)', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ unexpected: true }) }));
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ unexpected: true }) }));
       render(panel(TRANSCRIPTS));
       fireEvent.click(screen.getAllByRole('button', { name: 'View segments' })[0]);
       expect(await screen.findByText("Couldn't load segments for this language.")).toBeInTheDocument();
+    });
+
+    it('shows a load-error state on a non-OK response such as an expired signed URL (negative)', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ segments: [{ text: 'Hi.' }] }) }));
+      render(panel(TRANSCRIPTS));
+      fireEvent.click(screen.getAllByRole('button', { name: 'View segments' })[0]);
+      expect(await screen.findByText("Couldn't load segments for this language.")).toBeInTheDocument();
+      expect(screen.queryByText('Hi.')).not.toBeInTheDocument();
     });
 
     it('shows a load-error state when the fetch itself fails (negative)', async () => {
@@ -129,7 +128,7 @@ describe('<TranscriptPanel />', () => {
     });
 
     it('returns to the language list via "Back to languages"', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ segments: [{ text: 'Hi.' }] }) }));
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ segments: [{ text: 'Hi.' }] }) }));
       render(panel(TRANSCRIPTS));
       fireEvent.click(screen.getAllByRole('button', { name: 'View segments' })[0]);
       await screen.findByText('Hi.');
@@ -144,7 +143,7 @@ describe('<TranscriptPanel />', () => {
       render(panel(TRANSCRIPTS));
       fireEvent.click(screen.getAllByRole('button', { name: 'View segments' })[0]);
       fireEvent.click(screen.getByRole('button', { name: /Back to languages/ }));
-      await act(async () => { resolveFetch({ json: async () => ({ segments: [{ text: 'Late.' }] }) }); });
+      await act(async () => { resolveFetch({ ok: true, json: async () => ({ segments: [{ text: 'Late.' }] }) }); });
       expect(screen.queryByText('Late.')).not.toBeInTheDocument();
       expect(screen.getByText('English')).toBeInTheDocument();
     });
@@ -156,7 +155,7 @@ describe('<TranscriptPanel />', () => {
     });
 
     it('leaves the segments view when the drawer closes', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ segments: [{ text: 'Hi.' }] }) }));
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ segments: [{ text: 'Hi.' }] }) }));
       const ed = makeEd({ drawer: 'enrichments' });
       const { rerender } = render(<TranscriptPanel ed={ed} objects={TRANSCRIPTS} />);
       fireEvent.click(screen.getAllByRole('button', { name: 'View segments' })[0]);

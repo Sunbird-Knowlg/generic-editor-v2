@@ -66,6 +66,7 @@ export function normalizeContent(raw: Record<string, unknown>): ContentData {
     keywords: toArray(raw.keywords),
     collaborators: toArray(raw.collaborators),
     rejectReasons: toArray(raw.rejectReasons),
+    enrichmentTypes: toArray(raw.enrichmentTypes),
     board: typeof raw.board === 'string' ? raw.board : toArray(raw.board)?.[0],
   } as ContentData;
 }

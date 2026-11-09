@@ -1374,6 +1374,12 @@
   justify-content: space-between;
 }
 
+.ce-drawer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .ce-drawer-title-row {
   display: flex;
   align-items: center;
@@ -2841,12 +2847,6 @@
   gap: 6px;
   padding: 40px 16px;
   color: var(--ce-slate-500);
-}
-
-.ce-enrichments-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 8px;
 }
 
 .ce-enrichments-empty-title {

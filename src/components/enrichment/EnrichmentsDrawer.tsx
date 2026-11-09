@@ -27,16 +27,24 @@ const EnrichmentsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
       </button>
     </div>
   ) : (
-    <>
-      {/* The list is fetched once per open (no polling), so a Processing status only changes on refresh. */}
-      <div className="ce-enrichments-toolbar">
-        <button type="button" className="ce-link-btn" onClick={reloadEnrichments} disabled={enrichmentsLoading}>
-          <RefreshIcon size={12} /> {t(lang, 'REFRESH')}
-        </button>
-      </div>
-      <ui.Panel ed={ed} objects={enrichmentObjects.filter((o) => o.enrichmentObjectType === type)} />
-    </>
+    <ui.Panel ed={ed} objects={enrichmentObjects.filter((o) => o.enrichmentObjectType === type)} />
   );
+
+  // The list is fetched once per open (no polling), so a Processing status only changes on refresh.
+  // Hidden while the first load runs or after an error, where the body already shows a spinner or Retry.
+  const canRefresh = !!ui && !enrichmentsError && !(enrichmentsLoading && enrichmentObjects.length === 0);
+  const refreshButton = canRefresh ? (
+    <button
+      type="button"
+      className="ce-icon-btn"
+      onClick={reloadEnrichments}
+      disabled={enrichmentsLoading}
+      aria-label={t(lang, 'REFRESH')}
+      title={t(lang, 'REFRESH')}
+    >
+      <RefreshIcon size={14} />
+    </button>
+  ) : undefined;
 
   return (
     <Drawer
@@ -46,6 +54,7 @@ const EnrichmentsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
       title={def ? t(lang, def.drawerTitleKey) : ''}
       closeLabel={t(lang, 'CLOSE')}
       className="ce-drawer--enrichments"
+      headerAction={refreshButton}
     >
       {body}
     </Drawer>

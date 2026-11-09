@@ -12,19 +12,24 @@ interface DrawerProps {
   closeLabel?: string;
   /** Extra class on the root, e.g. for a drawer-specific scoped theme override. */
   className?: string;
+  /** Optional control shown in the header, left of the close button. */
+  headerAction?: React.ReactNode;
 }
 
 /** Slide-in drawer (right in LTR, left in RTL). Always mounted so the transform transition runs. */
-const Drawer: React.FC<DrawerProps> = ({ open, onClose, titleIcon, title, footer, children, closeLabel = 'Close', className }) => (
+const Drawer: React.FC<DrawerProps> = ({ open, onClose, titleIcon, title, footer, children, closeLabel = 'Close', className, headerAction }) => (
   <div className={`ce-drawer${className ? ` ${className}` : ''}`} data-open={open} aria-hidden={!open}>
     <div className="ce-drawer-head">
       <div className="ce-drawer-title-row">
         <span className="ce-drawer-title-ic">{titleIcon}</span>
         <h3 className="ce-drawer-title">{title}</h3>
       </div>
-      <button type="button" className="ce-icon-btn" onClick={onClose} aria-label={closeLabel}>
-        <CloseIcon size={12} />
-      </button>
+      <div className="ce-drawer-head-actions">
+        {headerAction}
+        <button type="button" className="ce-icon-btn" onClick={onClose} aria-label={closeLabel}>
+          <CloseIcon size={12} />
+        </button>
+      </div>
     </div>
     <div className="ce-drawer-body">{children}</div>
     {footer && <div className="ce-drawer-foot">{footer}</div>}

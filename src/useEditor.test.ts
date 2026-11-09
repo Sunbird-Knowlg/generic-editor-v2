@@ -1,9 +1,21 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useEditor } from './useEditor';
+import { detectFileMime } from './services/UploadService';
 import type { ContentEditorService } from './services/ContentEditorService';
+import type { ContentData, EnrichmentObject } from './types';
 import { mockContext } from './test/mockEd';
-import type { ContentData } from './types';
+
+vi.mock('./services/UploadService', () => ({
+  UploadService: class {
+    getPresignedUrl = vi.fn().mockResolvedValue('https://signed');
+    putToCloud = vi.fn().mockResolvedValue(undefined);
+    finalizeUpload = vi.fn().mockResolvedValue(undefined);
+    finalizeUrl = vi.fn().mockResolvedValue(undefined);
+  },
+  detectFileMime: vi.fn(),
+  detectUrlMime: vi.fn(),
+}));
 
 /** A fake service covering everything useEditor + UploadService touch on mount/upload. */
 function svc(over: Record<string, unknown> = {}) {
@@ -13,8 +25,7 @@ function svc(over: Record<string, unknown> = {}) {
     createLock: vi.fn().mockResolvedValue({}),
     retireLock: vi.fn().mockResolvedValue(undefined),
     sendForReview: vi.fn().mockResolvedValue({}),
-    createTranscript: vi.fn().mockResolvedValue({ transcriptId: 't1' }),
-    readTranscripts: vi.fn().mockResolvedValue([]),
+    listEnrichmentObjects: vi.fn().mockResolvedValue([]),
     updateContent: vi.fn().mockResolvedValue({ versionKey: 'vk2' }),
     readFormFields: vi.fn().mockResolvedValue([{ code: 'name', required: false }]),
     getBase: () => ({ baseUrl: '', apiSlug: '/action', headers: {}, fetchImpl: fetch }),
@@ -44,196 +55,198 @@ async function mountWithContent(service: ContentEditorService, content: ContentD
   return result;
 }
 
-function fakeFile(name: string, sizeBytes = 1024, type = 'video/mp4'): File {
-  const f = new File(['x'], name, { type });
-  Object.defineProperty(f, 'size', { value: sizeBytes });
-  return f;
+const video = (over: Partial<ContentData> = {}): ContentData => ({
+  identifier: 'do_1', name: 'Lecture', mimeType: 'video/mp4', status: 'Draft',
+  artifactUrl: 'https://cdn/do_1.mp4', createdBy: 'u1', versionKey: 'vk0', ...over,
+});
+
+const transcript = (over: Partial<EnrichmentObject> = {}): EnrichmentObject => ({
+  identifier: 't_en', enrichmentObjectType: 'Transcript', parentId: 'do_1', status: 'Live',
+  language: 'English', languageCode: 'en', sourceLanguage: true, ...over,
+});
+
+/** A fake service covering everything useEditor touches. `reads` are returned in order, then the last one repeats. */
+function makeService(reads: ContentData[], over: Record<string, unknown> = {}) {
+  const readContent = vi.fn();
+  reads.forEach((r, i) => (i < reads.length - 1 ? readContent.mockResolvedValueOnce(r) : readContent.mockResolvedValue(r)));
+  return {
+    readPrimaryCategories: vi.fn().mockResolvedValue([]),
+    readContent,
+    updateContent: vi.fn().mockResolvedValue({ versionKey: 'vk-new' }),
+    listEnrichmentObjects: vi.fn().mockResolvedValue([]),
+    createLock: vi.fn().mockResolvedValue({}),
+    retireLock: vi.fn().mockResolvedValue(undefined),
+    ...over,
+  } as unknown as ContentEditorService & {
+    readContent: ReturnType<typeof vi.fn>;
+    updateContent: ReturnType<typeof vi.fn>;
+    listEnrichmentObjects: ReturnType<typeof vi.fn>;
+  };
 }
 
-/** Stubs the 3-call upload pipeline (presign → cloud PUT → finalize) that
- *  UploadService drives with raw fetch, independent of ContentEditorService. */
-function stubUploadPipeline() {
-  return vi.fn(async (url: string) => {
-    const u = String(url);
-    if (u.includes('upload/url')) return { ok: true, json: async () => ({ result: { pre_signed_url: 'https://blob.test/upload' } }) };
-    if (u === 'https://blob.test/upload') return { ok: true };
-    return { ok: true, json: async () => ({ responseCode: 'OK' }) }; // finalize
-  }) as unknown as typeof fetch;
+async function openEditor(service: ReturnType<typeof makeService>) {
+  const hook = renderHook(() => useEditor({ context: mockContext, contentId: 'do_1', service, onClose: vi.fn() }));
+  await waitFor(() => expect(hook.result.current.content?.identifier).toBe('do_1'));
+  return hook;
 }
 
-describe('useEditor — hasTranscripts polling', () => {
-  it('polls readTranscripts periodically until transcripts appear, then stops polling', async () => {
-    vi.useFakeTimers();
-    try {
-      const readTranscripts = vi.fn()
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ identifier: 't1', language: 'English', status: 'Live' }]);
-      const service = svc({ readTranscripts });
-      (service.readContent as ReturnType<typeof vi.fn>).mockResolvedValue(videoContent());
-      const { result } = renderHook(() => useEditor({ context: mockContext, contentId: 'do_video_1', service }));
+const mp4 = () => new File(['x'], 'lecture.mp4');
 
-      await act(async () => { await vi.runOnlyPendingTimersAsync(); });
-      expect(result.current.hasTranscripts).toBe(false); // first check: not ready yet
+beforeEach(() => {
+  vi.mocked(detectFileMime).mockResolvedValue('video/mp4');
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
-      await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
-      expect(result.current.hasTranscripts).toBe(false); // still not ready on the first poll
-
-      await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
-      expect(result.current.hasTranscripts).toBe(true); // second poll: now it exists
-
-      const callsOnceConfirmed = readTranscripts.mock.calls.length;
-      await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
-      // No further reads once confirmed - polling stops instead of running forever.
-      expect(readTranscripts.mock.calls.length).toBe(callsOnceConfirmed);
-    } finally {
-      vi.useRealTimers();
-    }
+describe('useEditor — saving enrichmentTypes on upload', () => {
+  it('saves the ticked types with the versionKey of the fresh read, and updates local state', async () => {
+    const service = makeService([video({ versionKey: 'vk0' }), video({ versionKey: 'vk-fresh' })]);
+    const { result } = await openEditor(service);
+    await act(async () => { await result.current.uploadFile(mp4(), ['Transcript']); });
+    expect(service.updateContent).toHaveBeenCalledTimes(1);
+    expect(service.updateContent).toHaveBeenCalledWith('do_1', { enrichmentTypes: ['Transcript'] }, 'vk-fresh');
+    expect(result.current.content?.versionKey).toBe('vk-new');
+    expect(result.current.content?.enrichmentTypes).toEqual(['Transcript']);
+    expect(result.current.uploadSuccess).toBe(true);
   });
 
-  it('does not poll for non-video content (negative)', async () => {
-    vi.useFakeTimers();
-    try {
-      const readTranscripts = vi.fn().mockResolvedValue([]);
-      const service = svc({ readTranscripts });
-      (service.readContent as ReturnType<typeof vi.fn>).mockResolvedValue(videoContent({ mimeType: 'application/pdf' }));
-      renderHook(() => useEditor({ context: mockContext, contentId: 'do_video_1', service }));
-      await act(async () => { await vi.runOnlyPendingTimersAsync(); });
-      await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
-      expect(readTranscripts).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+  it('makes no update call when nothing is ticked (negative)', async () => {
+    const service = makeService([video(), video({ versionKey: 'vk-fresh' })]);
+    const { result } = await openEditor(service);
+    await act(async () => { await result.current.uploadFile(mp4(), []); });
+    await act(async () => { await result.current.uploadFile(mp4()); });
+    expect(service.updateContent).not.toHaveBeenCalled();
+    expect(result.current.content?.enrichmentTypes).toBeUndefined();
   });
 
-  it('stops polling after TRANSCRIPT_POLL_MAX_ATTEMPTS when transcripts never arrive', async () => {
-    vi.useFakeTimers();
-    try {
-      const readTranscripts = vi.fn().mockResolvedValue([]);
-      const service = svc({ readTranscripts });
-      (service.readContent as ReturnType<typeof vi.fn>).mockResolvedValue(videoContent());
-      renderHook(() => useEditor({ context: mockContext, contentId: 'do_video_1', service }));
-
-      await act(async () => { await vi.runOnlyPendingTimersAsync(); }); // initial check
-      for (let i = 0; i < 15; i++) {
-        await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
-      }
-      const callsAtCap = readTranscripts.mock.calls.length;
-      expect(callsAtCap).toBe(16); // 1 initial + 15 capped polls
-
-      await act(async () => { await vi.advanceTimersByTimeAsync(20000 * 5); });
-      // No further reads once the cap is hit - this is the "polls forever" bug being fixed.
-      expect(readTranscripts.mock.calls.length).toBe(callsAtCap);
-    } finally {
-      vi.useRealTimers();
-    }
+  it('makes no update call when the detected mimeType is not video, even if the file is named .mp4 (negative)', async () => {
+    vi.mocked(detectFileMime).mockResolvedValue('application/pdf');
+    const service = makeService([video(), video({ versionKey: 'vk-fresh' })]);
+    const { result } = await openEditor(service);
+    await act(async () => { await result.current.uploadFile(mp4(), ['Transcript']); });
+    expect(service.updateContent).not.toHaveBeenCalled();
   });
 
-  it('skips the fetch (but keeps ticking) while the tab is hidden (negative)', async () => {
-    vi.useFakeTimers();
-    const originalHidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
-    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
-    try {
-      const readTranscripts = vi.fn().mockResolvedValue([]);
-      const service = svc({ readTranscripts });
-      (service.readContent as ReturnType<typeof vi.fn>).mockResolvedValue(videoContent());
-      renderHook(() => useEditor({ context: mockContext, contentId: 'do_video_1', service }));
-      await act(async () => { await vi.runOnlyPendingTimersAsync(); }); // initial check always fires
-      const callsAfterInitial = readTranscripts.mock.calls.length;
-      await act(async () => { await vi.advanceTimersByTimeAsync(20000 * 3); });
-      expect(readTranscripts.mock.calls.length).toBe(callsAfterInitial);
-    } finally {
-      vi.useRealTimers();
-      if (originalHidden) Object.defineProperty(document, 'hidden', originalHidden);
-    }
+  it('drops a type that has no registry entry (negative)', async () => {
+    const service = makeService([video(), video({ versionKey: 'vk-fresh' })]);
+    const { result } = await openEditor(service);
+    await act(async () => { await result.current.uploadFile(mp4(), ['Summary']); });
+    expect(service.updateContent).not.toHaveBeenCalled();
   });
 
-  it('exposes the raw transcript list and transcriptsChecked alongside hasTranscripts', async () => {
-    const list = [{ identifier: 't1', language: 'English', status: 'Live' }];
-    const readTranscripts = vi.fn().mockResolvedValue(list);
-    const service = svc({ readTranscripts });
-    const result = await mountWithContent(service, videoContent());
-    await waitFor(() => expect(result.current.hasTranscripts).toBe(true));
-    expect(result.current.transcriptsChecked).toBe(true);
-    expect(result.current.transcripts).toEqual(list);
+  it('keeps the upload successful and shows a toast when the save fails (negative)', async () => {
+    const service = makeService([video(), video({ versionKey: 'vk-fresh' })], {
+      updateContent: vi.fn().mockRejectedValue(new Error('conflict')),
+    });
+    const { result } = await openEditor(service);
+    await act(async () => { await result.current.uploadFile(mp4(), ['Transcript']); });
+    expect(result.current.uploadSuccess).toBe(true);
+    expect(result.current.view).toBe('player');
+    expect(result.current.toast?.msg).toMatch(/Couldn't save the transcript request/);
+    expect(result.current.content?.versionKey).toBe('vk-fresh');
+    expect(result.current.content?.enrichmentTypes).toBeUndefined();
   });
 
-  it('marks transcriptsChecked true immediately for non-video content, without ever reading (negative)', async () => {
-    const service = svc();
-    (service.readContent as ReturnType<typeof vi.fn>).mockResolvedValue(videoContent({ mimeType: 'application/pdf' }));
-    const { result } = renderHook(() => useEditor({ context: mockContext, contentId: 'do_video_1', service }));
-    await waitFor(() => expect(result.current.content).toBeTruthy());
-    expect(result.current.transcriptsChecked).toBe(true);
-    expect(result.current.transcripts).toEqual([]);
-    expect(service.readTranscripts).not.toHaveBeenCalled();
+  it('clears saved types when the replacement file is one the type does not apply to', async () => {
+    vi.mocked(detectFileMime).mockResolvedValue('application/pdf');
+    const service = makeService([video(), video({ versionKey: 'vk-fresh', enrichmentTypes: ['Transcript'] })]);
+    const { result } = await openEditor(service);
+    await act(async () => { await result.current.uploadFile(new File(['x'], 'notes.pdf'), ['Transcript']); });
+    expect(service.updateContent).toHaveBeenCalledTimes(1);
+    expect(service.updateContent).toHaveBeenCalledWith('do_1', { enrichmentTypes: [] }, 'vk-fresh');
+    expect(result.current.content?.enrichmentTypes).toEqual([]);
+  });
+
+  it('clears saved types when the source is replaced by a URL', async () => {
+    const service = makeService([video(), video({ versionKey: 'vk-fresh', enrichmentTypes: ['Transcript'] })]);
+    const { result } = await openEditor(service);
+    await act(async () => { await result.current.uploadFromUrl('https://youtu.be/abc'); });
+    expect(service.updateContent).toHaveBeenCalledTimes(1);
+    expect(service.updateContent).toHaveBeenCalledWith('do_1', { enrichmentTypes: [] }, 'vk-fresh');
+    expect(result.current.content?.enrichmentTypes).toEqual([]);
   });
 });
 
-describe('useEditor — transcript generation on upload', () => {
-  it('calls createTranscript right after a successful video upload when the checkbox was checked', async () => {
-    const service = svc();
-    const result = await mountWithContent(service, videoContent());
-    const savedFetch = globalThis.fetch;
-    globalThis.fetch = stubUploadPipeline();
-    try {
-      await act(async () => { await result.current.uploadFile(fakeFile('lecture.mp4'), true); });
-      expect(service.createTranscript).toHaveBeenCalledWith('do_video_1');
-    } finally {
-      globalThis.fetch = savedFetch;
-    }
+describe('useEditor — enrichment objects on open', () => {
+  it('lists the objects once for a published video, and derives presentEnrichmentTypes', async () => {
+    const list = [transcript()];
+    const service = makeService([video({ pkgVersion: 1 })], { listEnrichmentObjects: vi.fn().mockResolvedValue(list) });
+    const { result } = await openEditor(service);
+    await waitFor(() => expect(result.current.enrichmentsChecked).toBe(true));
+    expect(service.listEnrichmentObjects).toHaveBeenCalledTimes(1);
+    expect(service.listEnrichmentObjects).toHaveBeenCalledWith('do_1', ['Transcript']);
+    expect(result.current.enrichmentObjects).toEqual(list);
+    expect(result.current.presentEnrichmentTypes).toEqual(['Transcript']);
   });
 
-  it('does not call createTranscript when the checkbox was unchecked (negative)', async () => {
-    const service = svc();
-    const result = await mountWithContent(service, videoContent());
-    const savedFetch = globalThis.fetch;
-    globalThis.fetch = stubUploadPipeline();
-    try {
-      await act(async () => { await result.current.uploadFile(fakeFile('lecture.mp4'), false); });
-      expect(service.createTranscript).not.toHaveBeenCalled();
-    } finally {
-      globalThis.fetch = savedFetch;
-    }
+  it('makes no call for a never-published video (no pkgVersion), and is checked immediately (negative)', async () => {
+    const service = makeService([video()]);
+    const { result } = await openEditor(service);
+    await waitFor(() => expect(result.current.enrichmentsChecked).toBe(true));
+    expect(service.listEnrichmentObjects).not.toHaveBeenCalled();
+    expect(result.current.presentEnrichmentTypes).toEqual([]);
   });
 
-  it('does not call createTranscript for a non-video file even if passed true (negative)', async () => {
-    const service = svc();
-    const result = await mountWithContent(service, videoContent({ mimeType: 'application/pdf' }));
-    const savedFetch = globalThis.fetch;
-    globalThis.fetch = stubUploadPipeline();
-    try {
-      await act(async () => { await result.current.uploadFile(fakeFile('doc.pdf', 1024, 'application/pdf'), true); });
-      expect(service.createTranscript).not.toHaveBeenCalled();
-    } finally {
-      globalThis.fetch = savedFetch;
-    }
+  it('makes no call for non-video content, even when published (negative)', async () => {
+    const service = makeService([video({ mimeType: 'application/pdf', pkgVersion: 2 })]);
+    const { result } = await openEditor(service);
+    await waitFor(() => expect(result.current.enrichmentsChecked).toBe(true));
+    expect(service.listEnrichmentObjects).not.toHaveBeenCalled();
   });
 
-  it('a failed transcript kickoff does not block the upload-success path (negative)', async () => {
-    const service = svc({ createTranscript: vi.fn().mockRejectedValue(new Error('boom')) });
-    const result = await mountWithContent(service, videoContent());
-    const savedFetch = globalThis.fetch;
-    globalThis.fetch = stubUploadPipeline();
-    try {
-      await act(async () => { await result.current.uploadFile(fakeFile('lecture.mp4'), true); });
-      await waitFor(() => expect(result.current.uploadSuccess).toBe(true));
-    } finally {
-      globalThis.fetch = savedFetch;
-    }
+  it('does not poll: no further calls as time passes (negative)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const service = makeService([video({ pkgVersion: 1 })]);
+    const { result } = await openEditor(service);
+    await waitFor(() => expect(result.current.enrichmentsChecked).toBe(true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000); });
+    expect(service.listEnrichmentObjects).toHaveBeenCalledTimes(1);
   });
 
-  it('sendForReview no longer triggers createTranscript - that now happens at upload time (negative)', async () => {
-    const service = svc();
-    const result = await mountWithContent(service, videoContent());
-    await act(async () => { await result.current.sendForReview(); });
-    expect(service.createTranscript).not.toHaveBeenCalled();
+  it('lists again when the content gains a pkgVersion (e.g. after a re-read)', async () => {
+    vi.mocked(detectFileMime).mockResolvedValue('video/mp4');
+    const service = makeService([video(), video({ pkgVersion: 1, versionKey: 'vk-fresh' })]);
+    const { result } = await openEditor(service);
+    expect(service.listEnrichmentObjects).not.toHaveBeenCalled();
+    await act(async () => { await result.current.uploadFile(mp4()); });
+    await waitFor(() => expect(service.listEnrichmentObjects).toHaveBeenCalledTimes(1));
   });
 
-  it('saveMetadataAndSubmit no longer triggers createTranscript (negative)', async () => {
-    const service = svc();
-    const result = await mountWithContent(service, videoContent());
-    await act(async () => { await result.current.saveMetadataAndSubmit({ name: 'A video (edited)' }); });
-    expect(service.createTranscript).not.toHaveBeenCalled();
+  it('reloadEnrichments lists again and replaces the objects', async () => {
+    const service = makeService([video({ pkgVersion: 1 })], {
+      listEnrichmentObjects: vi.fn()
+        .mockResolvedValueOnce([transcript({ status: 'Processing' })])
+        .mockResolvedValue([transcript({ status: 'Live' })]),
+    });
+    const { result } = await openEditor(service);
+    await waitFor(() => expect(result.current.enrichmentObjects[0]?.status).toBe('Processing'));
+    act(() => result.current.reloadEnrichments());
+    await waitFor(() => expect(result.current.enrichmentObjects[0]?.status).toBe('Live'));
+    expect(service.listEnrichmentObjects).toHaveBeenCalledTimes(2);
+  });
+
+  it('flags an error with empty objects when the list fails, and clears it on a successful retry (negative)', async () => {
+    const service = makeService([video({ pkgVersion: 1 })], {
+      listEnrichmentObjects: vi.fn()
+        .mockRejectedValueOnce(new Error('boom'))
+        .mockResolvedValue([transcript()]),
+    });
+    const { result } = await openEditor(service);
+    await waitFor(() => expect(result.current.enrichmentsError).toBe(true));
+    expect(result.current.enrichmentObjects).toEqual([]);
+    expect(result.current.enrichmentsChecked).toBe(true);
+    act(() => result.current.reloadEnrichments());
+    await waitFor(() => expect(result.current.enrichmentsError).toBe(false));
+    expect(result.current.enrichmentObjects).toHaveLength(1);
+  });
+
+  it('openEnrichmentDrawer opens the enrichments drawer for the given type', async () => {
+    const service = makeService([video({ pkgVersion: 1 })], { listEnrichmentObjects: vi.fn().mockResolvedValue([transcript()]) });
+    const { result } = await openEditor(service);
+    act(() => result.current.openEnrichmentDrawer('Transcript'));
+    expect(result.current.drawer).toBe('enrichments');
+    expect(result.current.enrichmentDrawerType).toBe('Transcript');
   });
 });
 

@@ -920,7 +920,6 @@
   animation: ce-spin 0.9s linear infinite;
 }
 
-
 .ce-progress-track {
   width: 320px;
   max-width: 80%;
@@ -1375,6 +1374,12 @@
   justify-content: space-between;
 }
 
+.ce-drawer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .ce-drawer-title-row {
   display: flex;
   align-items: center;
@@ -1795,7 +1800,6 @@
 .ce-toast--error .ce-toast-ic {
   color: #fff;
 }
-
 
 /* Centered overlay: fade the backdrop only — no horizontal shift. */
 
@@ -2662,7 +2666,15 @@
   gap: 12px;
 }
 
-.ce-transcript-check {
+.ce-enrichment-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.ce-enrichment-check {
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -2671,7 +2683,7 @@
   min-width: 0;
 }
 
-.ce-transcript-check input[type='checkbox'] {
+.ce-enrichment-check input[type='checkbox'] {
   margin-top: 2px;
   accent-color: var(--ce-primary);
   width: 14px;
@@ -2679,14 +2691,14 @@
   cursor: pointer;
 }
 
-.ce-transcript-check-title {
+.ce-enrichment-check-title {
   display: block;
   font-size: 13px;
   font-weight: 600;
   color: var(--ce-ink);
 }
 
-.ce-transcript-check-hint {
+.ce-enrichment-check-hint {
   display: block;
   font-size: 12px;
   color: var(--ce-slate-500);
@@ -2813,35 +2825,21 @@
   }
 }
 
-/* ============================ TRANSCRIPTS DRAWER ============================ */
+/* ============================ ENRICHMENTS DRAWER ============================ */
 /* Scoped to this drawer only - redefining --ce-font here (rather than at .ce-editor)
-   means only the transcripts page follows the portal's live font choice, leaving
+   means only the enrichments page follows the portal's live font choice, leaving
    every other drawer/component on the fixed default. --ce-btn/--ce-icon-btn are
    shared classes reused app-wide, so their radius is overridden here rather than
    at their own definition to keep that reuse untouched elsewhere. */
-.ce-drawer--transcripts {
+.ce-drawer--enrichments {
   --ce-font: var(--app-font-family, 'Rubik'), system-ui, -apple-system, sans-serif;
 }
-.ce-drawer--transcripts .ce-btn,
-.ce-drawer--transcripts .ce-icon-btn {
+.ce-drawer--enrichments .ce-btn,
+.ce-drawer--enrichments .ce-icon-btn {
   border-radius: var(--r-sm, 9px);
 }
 
-.ce-transcripts-note {
-  font-size: 12px;
-  color: #1d4ed8;
-  background: rgba(37, 99, 235, 0.08);
-  border: 1px solid rgba(37, 99, 235, 0.2);
-  /* Inset shadow instead of border-left: a differently-sized border-left doesn't
-     follow border-radius's curve cleanly and looks pinched at the corners. */
-  box-shadow: inset 3px 0 0 0 #2563eb;
-  border-radius: var(--r-sm, 8px);
-  padding: 8px 10px 8px 13px;
-  margin: 0 0 10px 0;
-  line-height: 1.4;
-}
-
-.ce-transcripts-empty {
+.ce-enrichments-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2851,14 +2849,14 @@
   color: var(--ce-slate-500);
 }
 
-.ce-transcripts-empty-title {
+.ce-enrichments-empty-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--ce-ink);
   margin: 6px 0 0 0;
 }
 
-.ce-transcripts-empty-sub {
+.ce-enrichments-empty-sub {
   font-size: 12.5px;
   margin: 0;
   max-width: 260px;
@@ -2933,7 +2931,7 @@
   margin-top: 2px;
 }
 
-.ce-transcript-status {
+.ce-enrichment-status {
   flex: none;
   display: flex;
   align-items: center;
@@ -2943,20 +2941,22 @@
   white-space: nowrap;
 }
 
-.ce-transcript-status-dot {
+.ce-enrichment-status-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
 }
 
-.ce-transcript-status--live { color: #16a34a; }
-.ce-transcript-status--live .ce-transcript-status-dot { background: #16a34a; }
-.ce-transcript-status--review { color: #b45309; }
-.ce-transcript-status--review .ce-transcript-status-dot { background: #f59e0b; }
-.ce-transcript-status--processing { color: #2563eb; }
-.ce-transcript-status--processing .ce-transcript-status-dot { background: #2563eb; }
-.ce-transcript-status--failed { color: #dc2626; }
-.ce-transcript-status--failed .ce-transcript-status-dot { background: #dc2626; }
+.ce-enrichment-status--live { color: #16a34a; }
+.ce-enrichment-status--live .ce-enrichment-status-dot { background: #16a34a; }
+.ce-enrichment-status--review { color: #b45309; }
+.ce-enrichment-status--review .ce-enrichment-status-dot { background: #f59e0b; }
+.ce-enrichment-status--processing { color: #2563eb; }
+.ce-enrichment-status--processing .ce-enrichment-status-dot { background: #2563eb; }
+.ce-enrichment-status--draft { color: #6b7280; }
+.ce-enrichment-status--draft .ce-enrichment-status-dot { background: #9ca3af; }
+.ce-enrichment-status--failed { color: #dc2626; }
+.ce-enrichment-status--failed .ce-enrichment-status-dot { background: #dc2626; }
 
 .ce-transcript-card-actions {
   display: flex;
@@ -2982,28 +2982,6 @@
   font-size: 16px;
   font-weight: 700;
   color: var(--ce-ink);
-}
-
-.ce-transcript-review-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.ce-transcript-action-error {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.ce-transcript-segment-edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 12px;
 }
 
 .ce-transcript-segment-list {
@@ -3033,26 +3011,6 @@
   font-size: 13px;
   color: var(--ce-ink-2);
   line-height: 1.4;
-}
-
-.ce-transcript-segment-input {
-  flex: 1;
-  min-height: 44px;
-  padding: 6px 10px;
-  font-size: 13px;
-  line-height: 1.4;
-  border: 1.5px solid var(--ce-border);
-  border-radius: var(--r-sm, 8px);
-  color: var(--ce-ink);
-  font-family: var(--ce-font);
-  background: var(--ce-white);
-  outline: none;
-  box-sizing: border-box;
-  resize: vertical;
-}
-
-.ce-transcript-segment-input:focus {
-  border-color: var(--ce-primary);
 }
 
 /* Foreign global-reset guard: re-asserts normal text flow to override a sibling package's document-wide element reset (max-inline-size/text-wrap) via higher specificity. */

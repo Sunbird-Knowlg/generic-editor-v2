@@ -245,4 +245,5 @@ export const TRANSLATIONS_EN: Record<string, string> = {
   ERROR_LOAD: 'Failed to load content.',
   ERROR_TITLE_REQUIRED: 'Title is required.',
   RETRY: 'Retry',
+  REFRESH: 'Refresh',
 };

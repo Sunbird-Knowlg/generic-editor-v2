@@ -102,6 +102,7 @@ export const TRANSLATIONS_PT: Record<string, string> = {
   ERROR_LOAD: 'Falha ao carregar o conteúdo.',
   ERROR_TITLE_REQUIRED: 'O título é obrigatório.',
   RETRY: 'Tentar novamente',
+  REFRESH: 'Atualizar',
 
   EDIT_CONTENT_DETAILS: 'Editar detalhes do conteúdo',
   SAVE_AND_SUBMIT: 'Salvar e enviar para revisão',

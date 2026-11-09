@@ -2,7 +2,7 @@ import React from 'react';
 import Drawer from '../Drawer';
 import type { EditorController } from '../../useEditor';
 import { t } from '../../i18n/i18n';
-import { CaptionsIcon } from '../../icons';
+import { CaptionsIcon, RefreshIcon } from '../../icons';
 import { enrichmentDefinition } from '../../services/enrichment/registry';
 import { ENRICHMENT_UI } from './enrichmentUi';
 
@@ -27,7 +27,15 @@ const EnrichmentsDrawer: React.FC<{ ed: EditorController }> = ({ ed }) => {
       </button>
     </div>
   ) : (
-    <ui.Panel ed={ed} objects={enrichmentObjects.filter((o) => o.enrichmentObjectType === type)} />
+    <>
+      {/* The list is fetched once per open (no polling), so a Processing status only changes on refresh. */}
+      <div className="ce-enrichments-toolbar">
+        <button type="button" className="ce-link-btn" onClick={reloadEnrichments} disabled={enrichmentsLoading}>
+          <RefreshIcon size={12} /> {t(lang, 'REFRESH')}
+        </button>
+      </div>
+      <ui.Panel ed={ed} objects={enrichmentObjects.filter((o) => o.enrichmentObjectType === type)} />
+    </>
   );
 
   return (

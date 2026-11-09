@@ -2843,6 +2843,12 @@
   color: var(--ce-slate-500);
 }
 
+.ce-enrichments-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
 .ce-enrichments-empty-title {
   font-size: 14px;
   font-weight: 600;

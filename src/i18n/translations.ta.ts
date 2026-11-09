@@ -102,6 +102,7 @@ export const TRANSLATIONS_TA: Record<string, string> = {
   ERROR_LOAD: 'உள்ளடக்கத்தை ஏற்ற முடியவில்லை.',
   ERROR_TITLE_REQUIRED: 'தலைப்பு அவசியம்.',
   RETRY: 'மீண்டும் முயற்சி',
+  REFRESH: 'புதுப்பி',
 
   EDIT_CONTENT_DETAILS: 'உள்ளடக்க விவரங்களைத் திருத்து',
   SAVE_AND_SUBMIT: 'சேமித்து மதிப்பாய்வுக்கு அனுப்பு',

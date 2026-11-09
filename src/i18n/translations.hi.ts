@@ -102,6 +102,7 @@ export const TRANSLATIONS_HI: Record<string, string> = {
   ERROR_LOAD: 'सामग्री लोड करने में विफल।',
   ERROR_TITLE_REQUIRED: 'शीर्षक आवश्यक है।',
   RETRY: 'पुनः प्रयास करें',
+  REFRESH: 'रीफ़्रेश करें',
 
   EDIT_CONTENT_DETAILS: 'सामग्री विवरण संपादित करें',
   SAVE_AND_SUBMIT: 'सहेजें और समीक्षा के लिए भेजें',

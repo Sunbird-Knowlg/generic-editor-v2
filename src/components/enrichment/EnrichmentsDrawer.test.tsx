@@ -42,6 +42,18 @@ describe('<EnrichmentsDrawer />', () => {
     expect(reloadEnrichments).toHaveBeenCalledTimes(1);
   });
 
+  it('shows a Refresh button in the loaded panel that calls reloadEnrichments', () => {
+    const reloadEnrichments = vi.fn();
+    render(<EnrichmentsDrawer ed={open({ enrichmentObjects: [obj({ status: 'Processing' })], reloadEnrichments })} />);
+    fireEvent.click(screen.getByRole('button', { name: /Refresh/ }));
+    expect(reloadEnrichments).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables Refresh while a reload is in flight (negative)', () => {
+    render(<EnrichmentsDrawer ed={open({ enrichmentObjects: [obj({})], enrichmentsLoading: true })} />);
+    expect(screen.getByRole('button', { name: /Refresh/ })).toBeDisabled();
+  });
+
   it("shows the type's empty state when it has no objects", () => {
     render(<EnrichmentsDrawer ed={open()} />);
     expect(screen.getByText('No transcripts yet')).toBeInTheDocument();

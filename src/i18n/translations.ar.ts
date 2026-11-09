@@ -102,6 +102,7 @@ export const TRANSLATIONS_AR: Record<string, string> = {
   ERROR_LOAD: 'فشل تحميل المحتوى.',
   ERROR_TITLE_REQUIRED: 'العنوان مطلوب.',
   RETRY: 'إعادة المحاولة',
+  REFRESH: 'تحديث',
 
   EDIT_CONTENT_DETAILS: 'تعديل تفاصيل المحتوى',
   SAVE_AND_SUBMIT: 'حفظ وإرسال للمراجعة',

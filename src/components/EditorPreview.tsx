@@ -66,9 +66,10 @@ const EditorPreview: React.FC<{ ed: EditorController; context: EditorContext }> 
 
   const hasEnrichments = enrichmentTypesForMime(content.mimeType).length > 0;
   const previewMetadata = applyEnrichments(content, enrichmentObjects);
-  // The iframe key changes only when the actual Live set changes (not just its count), so a
-  // same-count swap (one object leaves Live as another joins) still remounts.
-  const enrichmentsKey = enrichmentObjects.filter((o) => o.status === 'Live').map((o) => `${o.identifier}:${String(o.captionsUrl ?? '')}`).sort().join(',');
+  // Keyed on what the player actually receives (Live objects with a caption URL), so a change it can't show never restarts playback.
+  // A same-count swap (one object leaves as another joins) still changes the key and remounts.
+  const enrichmentsKey = ((previewMetadata.transcripts ?? []) as { identifier: string; artifactUrl: string }[])
+    .map((tr) => `${tr.identifier}:${tr.artifactUrl}`).sort().join(',');
 
   return (
     <div className="ce-preview-card">

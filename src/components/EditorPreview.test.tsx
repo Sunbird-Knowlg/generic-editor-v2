@@ -67,6 +67,18 @@ describe('<EditorPreview />', () => {
     expect(container.querySelector('iframe')).toBe(withoutStatusIframe);
   });
 
+  it('does not remount when a Live object without a caption URL appears (negative)', () => {
+    const videoContent = { ...mockContent, mimeType: 'video/mp4' };
+    const withUrl = { identifier: 't_en', enrichmentObjectType: 'Transcript', parentId: 'do_1', status: 'Live', captionsUrl: 'https://x/en.vtt' } as EnrichmentObject;
+    const noUrl = { identifier: 't_hi', enrichmentObjectType: 'Transcript', parentId: 'do_1', status: 'Live' } as EnrichmentObject;
+    const { container, rerender } = render(
+      <EditorPreview ed={makeEd({ content: videoContent, enrichmentsChecked: true, enrichmentObjects: [withUrl] })} context={mockContext} />,
+    );
+    const first = container.querySelector('iframe');
+    rerender(<EditorPreview ed={makeEd({ content: videoContent, enrichmentsChecked: true, enrichmentObjects: [withUrl, noUrl] })} context={mockContext} />);
+    expect(container.querySelector('iframe')).toBe(first);
+  });
+
   it('remounts the iframe (new DOM node) when the Live set changes at equal length', () => {
     const videoContent = { ...mockContent, mimeType: 'video/mp4' };
     const live = (identifier: string, languageCode: string): EnrichmentObject => ({

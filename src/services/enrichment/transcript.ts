@@ -35,7 +35,6 @@ function applyToContent(content: ContentData, objects: EnrichmentObject[]): Cont
 export const transcriptDefinition: EnrichmentDefinition = {
   type: 'Transcript',
   mimeTypes: ['video/mp4', 'video/webm'],
-  extensions: ['mp4', 'webm'],
   uploadLabelKey: 'GENERATE_TRANSCRIPTS',
   uploadHintKey: 'GENERATE_TRANSCRIPTS_HINT',
   headerLabelKey: 'VIEW_TRANSCRIPT',

@@ -1,5 +1,6 @@
 /** Enrichment registry — one entry per backend `enrichmentObjectType`; everything outside these entries is type-agnostic. */
 import type { ContentData, EnrichmentObject } from '../../types';
+import { EXTENSION_MIME } from '../../constants';
 import { transcriptDefinition } from './transcript';
 
 export interface EnrichmentDefinition {
@@ -7,8 +8,6 @@ export interface EnrichmentDefinition {
   type: string;
   /** Content mimeTypes this enrichment applies to. */
   mimeTypes: readonly string[];
-  /** File extensions that trigger the upload-time prompt. */
-  extensions: readonly string[];
   /** i18n keys for the upload-time checkbox and its hint. */
   uploadLabelKey: string;
   uploadHintKey: string;
@@ -33,10 +32,10 @@ export function enrichmentTypesForMime(mimeType?: string): string[] {
   return mimeType ? ENRICHMENT_REGISTRY.filter((d) => d.mimeTypes.includes(mimeType)).map((d) => d.type) : [];
 }
 
-/** Definitions whose upload-time prompt applies to a file, by extension. */
+/** Definitions whose upload-time prompt applies to a file: its extension's mimeType (EXTENSION_MIME) must be one the type accepts. */
 export function enrichmentsForFile(file: File): EnrichmentDefinition[] {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-  return ENRICHMENT_REGISTRY.filter((d) => d.extensions.includes(ext));
+  return ENRICHMENT_REGISTRY.filter((d) => d.mimeTypes.includes(EXTENSION_MIME[ext] ?? ''));
 }
 
 /** Folds every registered type's objects onto the content. */

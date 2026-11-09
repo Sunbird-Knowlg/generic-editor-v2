@@ -147,6 +147,25 @@ describe('useEditor — saving enrichmentTypes on upload', () => {
     expect(result.current.content?.versionKey).toBe('vk-fresh');
     expect(result.current.content?.enrichmentTypes).toBeUndefined();
   });
+
+  it('clears saved types when the replacement file is one the type does not apply to', async () => {
+    vi.mocked(detectFileMime).mockResolvedValue('application/pdf');
+    const service = makeService([video(), video({ versionKey: 'vk-fresh', enrichmentTypes: ['Transcript'] })]);
+    const { result } = await openEditor(service);
+    await act(async () => { await result.current.uploadFile(new File(['x'], 'notes.pdf'), ['Transcript']); });
+    expect(service.updateContent).toHaveBeenCalledTimes(1);
+    expect(service.updateContent).toHaveBeenCalledWith('do_1', { enrichmentTypes: [] }, 'vk-fresh');
+    expect(result.current.content?.enrichmentTypes).toEqual([]);
+  });
+
+  it('clears saved types when the source is replaced by a URL', async () => {
+    const service = makeService([video(), video({ versionKey: 'vk-fresh', enrichmentTypes: ['Transcript'] })]);
+    const { result } = await openEditor(service);
+    await act(async () => { await result.current.uploadFromUrl('https://youtu.be/abc'); });
+    expect(service.updateContent).toHaveBeenCalledTimes(1);
+    expect(service.updateContent).toHaveBeenCalledWith('do_1', { enrichmentTypes: [] }, 'vk-fresh');
+    expect(result.current.content?.enrichmentTypes).toEqual([]);
+  });
 });
 
 describe('useEditor — enrichment objects on open', () => {

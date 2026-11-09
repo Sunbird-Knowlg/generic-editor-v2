@@ -186,6 +186,7 @@ export const TRANSLATIONS_FR: Record<string, string> = {
   VIEW_SEGMENTS: 'Voir les segments',
   BACK_TO_LANGUAGES: 'Retour aux langues',
   SEGMENTS_LOAD_ERROR: 'Impossible de charger les segments de cette langue.',
+  SEGMENTS_EMPTY: 'Aucune parole détectée dans cette langue.',
   TRANSCRIPTS_LOAD_ERROR_TITLE: 'Impossible de charger les transcriptions',
   NO_TRANSCRIPTS_TITLE: 'Aucune transcription pour le moment',
   NO_TRANSCRIPTS_SUB: 'Les transcriptions apparaissent ici une fois cette vidéo publiée.',

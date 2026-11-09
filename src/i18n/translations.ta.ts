@@ -186,6 +186,7 @@ export const TRANSLATIONS_TA: Record<string, string> = {
   VIEW_SEGMENTS: 'பகுதிகளைப் பார்க்க',
   BACK_TO_LANGUAGES: 'மொழிகளுக்குத் திரும்பு',
   SEGMENTS_LOAD_ERROR: 'இந்த மொழிக்கான பகுதிகளை ஏற்ற முடியவில்லை.',
+  SEGMENTS_EMPTY: 'இந்த மொழியில் பேச்சு எதுவும் கண்டறியப்படவில்லை.',
   TRANSCRIPTS_LOAD_ERROR_TITLE: 'டிரான்ஸ்கிரிப்ட்களை ஏற்ற முடியவில்லை',
   NO_TRANSCRIPTS_TITLE: 'இதுவரை டிரான்ஸ்கிரிப்ட் இல்லை',
   NO_TRANSCRIPTS_SUB: 'இந்த வீடியோ வெளியிடப்பட்ட பிறகு டிரான்ஸ்கிரிப்ட்கள் இங்கே தோன்றும்.',

@@ -22,7 +22,7 @@ function parseSegments(raw: unknown): TranscriptSegment[] | null {
       end: typeof end === 'number' ? end : undefined,
     });
   });
-  return segments.length ? segments : null;
+  return segments;
 }
 
 function formatTimestamp(seconds?: number): string {
@@ -77,6 +77,8 @@ const TranscriptSegmentsView: React.FC<{ lang: string; transcript: TranscriptObj
         </div>
       ) : error || !segments ? (
         <p className="ce-enrichments-empty-sub">{t(lang, 'SEGMENTS_LOAD_ERROR')}</p>
+      ) : segments.length === 0 ? (
+        <p className="ce-enrichments-empty-sub">{t(lang, 'SEGMENTS_EMPTY')}</p>
       ) : (
         <div className="ce-transcript-segment-list">
           {segments.map((seg, i) => (

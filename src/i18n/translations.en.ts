@@ -83,6 +83,7 @@ export const TRANSLATIONS_EN: Record<string, string> = {
   VIEW_SEGMENTS: 'View segments',
   BACK_TO_LANGUAGES: 'Back to languages',
   SEGMENTS_LOAD_ERROR: "Couldn't load segments for this language.",
+  SEGMENTS_EMPTY: 'No speech was detected in this language.',
   TRANSCRIPTS_LOAD_ERROR_TITLE: "Couldn't load transcripts",
   NO_TRANSCRIPTS_TITLE: 'No transcripts yet',
   NO_TRANSCRIPTS_SUB: 'Transcripts appear here after this video is published.',

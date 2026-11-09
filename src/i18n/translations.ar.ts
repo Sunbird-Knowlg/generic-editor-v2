@@ -186,6 +186,7 @@ export const TRANSLATIONS_AR: Record<string, string> = {
   VIEW_SEGMENTS: 'عرض المقاطع',
   BACK_TO_LANGUAGES: 'العودة إلى اللغات',
   SEGMENTS_LOAD_ERROR: 'تعذّر تحميل مقاطع هذه اللغة.',
+  SEGMENTS_EMPTY: 'لم يتم اكتشاف أي كلام في هذه اللغة.',
   TRANSCRIPTS_LOAD_ERROR_TITLE: 'تعذّر تحميل النصوص',
   NO_TRANSCRIPTS_TITLE: 'لا توجد نصوص بعد',
   NO_TRANSCRIPTS_SUB: 'تظهر النصوص هنا بعد نشر هذا الفيديو.',

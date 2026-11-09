@@ -186,6 +186,7 @@ export const TRANSLATIONS_HI: Record<string, string> = {
   VIEW_SEGMENTS: 'सेगमेंट देखें',
   BACK_TO_LANGUAGES: 'भाषाओं पर वापस जाएं',
   SEGMENTS_LOAD_ERROR: 'इस भाषा के सेगमेंट लोड नहीं हो सके।',
+  SEGMENTS_EMPTY: 'इस भाषा में कोई भाषण नहीं मिला।',
   TRANSCRIPTS_LOAD_ERROR_TITLE: 'ट्रांसक्रिप्ट लोड नहीं हो सकीं',
   NO_TRANSCRIPTS_TITLE: 'अभी तक कोई ट्रांसक्रिप्ट नहीं',
   NO_TRANSCRIPTS_SUB: 'इस वीडियो के प्रकाशित होने के बाद ट्रांसक्रिप्ट यहां दिखाई देंगी।',

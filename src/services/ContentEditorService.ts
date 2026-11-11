@@ -1,5 +1,8 @@
 /** ContentEditorService — backend abstraction for the editor; calls go to relative `/action/...` (proxied to knowledge-mw/Kong) by default, overridable via EditorConfig. */
-import type { ContentData, EditorContext, EditorConfig, FrameworkCategory, FormField, AssetItem, RawTranscript } from '../types';
+import type { ContentData, EditorContext, EditorConfig, FrameworkCategory, FormField, AssetItem, EnrichmentObject } from '../types';
+
+/** Keep in sync with useEditor.ts's DYNAMIC_ASSESS_CATEGORY (not imported: the modules don't otherwise depend on each other). */
+const DYNAMIC_ASSESS_ECML_CATEGORY = 'Dynamic Course Assessment';
 
 const DEFAULT_ENDPOINTS = {
   /* Versions verified against the portal's ContentService, the old generic editor, and the backend proxy; all hit /action → knowledge-mw. */
@@ -22,12 +25,10 @@ const DEFAULT_ENDPOINTS = {
   userSearch: 'user/v1/search',
   reviewCommentCreate: 'review/comment/v1/create/comment',
   reviewCommentRead: 'review/comment/v1/read/comment',
-  transcriptCreate: 'content/v4/enrichment/object/create',
-  transcriptUpdate: 'content/v4/enrichment/object/update',
-  transcriptApprove: 'content/v4/enrichment/object/approve',
-  transcriptReject: 'content/v4/enrichment/object/reject',
-  /* v1, not v3 - only v1+enrich=all via the /portal/* proxy route is confirmed to return enrichment.transcripts (see readTranscripts()'s own comment). */
-  transcriptsRead: 'content/v1/read',
+  /* Only the gateway (served under portalSlug, not /action) exposes the enrichment object list. */
+  enrichmentList: 'object/enrichment/v4/list',
+  /* Dynamic Assess — triggers the knowlg-publish job's pool-based question selection. */
+  refreshBody: 'content/v3/refresh/body',
 } as const;
 
 export type EndpointMap = Partial<typeof DEFAULT_ENDPOINTS>;
@@ -36,7 +37,9 @@ const READ_FIELDS = [
   'name', 'description', 'mimeType', 'contentType', 'primaryCategory', 'resourceType',
   'status', 'artifactUrl', 'streamingUrl', 'downloadUrl', 'appIcon', 'posterImage',
   'framework', 'board', 'medium', 'gradeLevel', 'subject', 'keywords', 'collaborators',
-  'createdBy', 'creator', 'versionKey', 'pkgVersion', 'rejectReasons', 'rejectComment',
+  'createdBy', 'creator', 'versionKey', 'pkgVersion', 'enrichmentTypes', 'rejectReasons', 'rejectComment', 'channel',
+  /* Dynamic Assess fields (absent on other content); the knowlg-publish job sets totalQuestions and lastUpdatedOn, knowlg-service sets minCriteria and multiplier at create. The selected skills' field depends on the framework, so callers add it via extraFields. */
+  'difficultyTarget', 'totalQuestions', 'lastUpdatedOn', 'minCriteria', 'multiplier',
 ].join(',');
 
 function toArray(val: unknown): string[] | undefined {
@@ -63,6 +66,7 @@ export function normalizeContent(raw: Record<string, unknown>): ContentData {
     keywords: toArray(raw.keywords),
     collaborators: toArray(raw.collaborators),
     rejectReasons: toArray(raw.rejectReasons),
+    enrichmentTypes: toArray(raw.enrichmentTypes),
     board: typeof raw.board === 'string' ? raw.board : toArray(raw.board)?.[0],
   } as ContentData;
 }
@@ -114,8 +118,13 @@ export class ContentEditorService {
       body: body !== undefined ? JSON.stringify(body) : undefined,
       ...(opts?.cache ? { cache: opts.cache } : {}),
     });
-    // A malformed/unparseable body must NOT be read as success — every Sunbird action API
-    // returns a JSON envelope, so a parse failure means the write likely never landed.
+    return (await this.readEnvelope<{ result?: T }>(resp, path)).result as T;
+  }
+
+  /** Parses a Sunbird JSON envelope, throwing on a non-OK status, non-OK responseCode or unparseable body.
+   *  A malformed body must NOT be read as success — every Sunbird API returns a JSON envelope, so a
+   *  parse failure means the write likely never landed. */
+  private async readEnvelope<E>(resp: Response, label: string): Promise<E> {
     let data: unknown = {};
     let parseFailed = false;
     try {
@@ -128,15 +137,15 @@ export class ContentEditorService {
       const errmsg =
         (data as { params?: { errmsg?: string; err?: string } }).params?.errmsg ||
         (parseFailed
-          ? `Malformed response (${resp.status}) for ${path}`
-          : `Request failed (${resp.status}) for ${path}`);
+          ? `Malformed response (${resp.status}) for ${label}`
+          : `Request failed (${resp.status}) for ${label}`);
       const err = new Error(errmsg) as Error & { code?: string; status?: number; body?: unknown };
       err.code = (data as { params?: { err?: string } }).params?.err;
       err.status = resp.status;
       err.body = data;
       throw err;
     }
-    return (data as { result?: T }).result as T;
+    return data as E;
   }
 
   /** POST content/v1/create — returns new identifier. */
@@ -173,8 +182,11 @@ export class ContentEditorService {
   /** GET content/v3/read/{id}?mode=edit — no-store, since this page re-reads its own content right after
    *  mutating it; also sends Cache-Control: no-cache so an intermediary gateway cache (e.g. Kong's
    *  proxy-cache plugin, which honors this request header) doesn't serve a pre-mutation response. */
-  async readContent(contentId: string, mode = 'edit'): Promise<ContentData> {
-    const path = `${this.ep.read}/${encodeURIComponent(contentId)}?mode=${mode}&fields=${READ_FIELDS}`;
+  async readContent(contentId: string, mode = 'edit', opts: { withBody?: boolean; extraFields?: string[] } = {}): Promise<ContentData> {
+    // body and extra fields are opt-in (only Dynamic Assess needs them), so other content reads exactly the fields it always did.
+    const extra = [...(opts.withBody ? ['body'] : []), ...(opts.extraFields ?? [])].filter((f) => f && !READ_FIELDS.split(',').includes(f));
+    const fields = extra.length ? `${READ_FIELDS},${[...new Set(extra)].join(',')}` : READ_FIELDS;
+    const path = `${this.ep.read}/${encodeURIComponent(contentId)}?mode=${mode}&fields=${fields}`;
     const result = await this.request<{ content: Record<string, unknown> }>('GET', path, undefined, {
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache' },
@@ -201,66 +213,38 @@ export class ContentEditorService {
     });
   }
 
-  /** POST content/v4/enrichment/object/create/{id} — kicks off async transcript generation. */
-  async createTranscript(contentId: string): Promise<{ identifier?: string; transcriptId?: string; message?: string }> {
-    return this.request('POST', `${this.ep.transcriptCreate}/${encodeURIComponent(contentId)}`, {
-      request: { object: { objectType: 'Transcript' } },
+  /** POST content/v3/refresh/body/{id}: queues pool-based question selection; the API rejects a blank lastPublishedBy, same body shape as publish. */
+  async refreshContentBody(contentId: string, lastPublishedBy: string): Promise<unknown> {
+    return this.request('POST', `${this.ep.refreshBody}/${encodeURIComponent(contentId)}`, {
+      request: { content: { lastPublishedBy } },
     });
   }
 
-  /** PATCH content/v4/enrichment/object/update/{contentId}/{transcriptId} — persists the full segment
-   *  list (the API expects the whole set, not a diff). Callers should send back the original segment
-   *  objects with only the edited fields changed (not a reconstruction), so unrecognized fields the
-   *  parser doesn't know about (Whisper's seek/tokens/... etc.) survive a round-trip - hence `unknown[]`
-   *  rather than `TranscriptSegment[]` here. */
-  async updateTranscript(contentId: string, transcriptId: string, segments: unknown[]): Promise<unknown> {
-    return this.request(
-      'PATCH',
-      `${this.ep.transcriptUpdate}/${encodeURIComponent(contentId)}/${encodeURIComponent(transcriptId)}`,
-      { request: { object: { objectType: 'Transcript', segments } } },
-    );
-  }
-
-  /** POST content/v4/enrichment/object/approve/{contentId}/{transcriptId} — only valid while Review, else 400s with ERR_TRANSCRIPT_NOT_IN_REVIEW. */
-  async approveTranscript(contentId: string, transcriptId: string): Promise<unknown> {
-    return this.request(
-      'POST',
-      `${this.ep.transcriptApprove}/${encodeURIComponent(contentId)}/${encodeURIComponent(transcriptId)}`,
-      { request: { object: { objectType: 'Transcript' } } },
-    );
-  }
-
-  /** POST content/v4/enrichment/object/reject/{contentId}/{transcriptId} — only valid while Review; resets it to Draft. */
-  async rejectTranscript(contentId: string, transcriptId: string): Promise<unknown> {
-    return this.request(
-      'POST',
-      `${this.ep.transcriptReject}/${encodeURIComponent(contentId)}/${encodeURIComponent(transcriptId)}`,
-      { request: { object: { objectType: 'Transcript' } } },
-    );
-  }
-
-  /** GET {portalSlug}/content/v1/read/{id}?enrich=all — bypasses this.apiSlug and hits the portal
-   *  proxy directly (default '/portal', overridable via config.portalSlug), since v1/read+enrich=all
-   *  only works via Kong's proxy, not direct-to-knowledge-mw /action routes. */
-  async readTranscripts(contentId: string): Promise<RawTranscript[]> {
-    const url = `${this.baseUrl}${this.portalSlug}/${this.ep.transcriptsRead}/${encodeURIComponent(contentId)}?fields=identifier&enrich=all`;
-    // no-store (browser-local) + Cache-Control: no-cache (honored by Kong's proxy-cache plugin to
-    // bypass its gateway-level cache) - transcript status changes server-side right after approve/
-    // reject, so either layer serving a cached response here can show a stale status.
-    const resp = await this.fetchImpl(url, {
-      method: 'GET',
-      headers: { ...this.headers, 'Cache-Control': 'no-cache' },
-      credentials: 'same-origin',
-      cache: 'no-store',
-    });
-    let data: { result?: { content?: { enrichment?: { transcripts?: RawTranscript[] } } }; responseCode?: string; params?: { errmsg?: string } } = {};
-    let parseFailed = false;
-    try { data = await resp.json(); } catch { parseFailed = true; }
-    if (!resp.ok || parseFailed || (data.responseCode && data.responseCode !== 'OK' && data.responseCode !== 'ok')) {
-      throw new Error(data?.params?.errmsg
-        || (parseFailed ? `Malformed response (${resp.status}) for ${url}` : `Request failed (${resp.status}) for ${url}`));
-    }
-    return data.result?.content?.enrichment?.transcripts ?? [];
+  /** POST {portalSlug}/object/enrichment/v4/list — every non-Retired EnrichmentObject under `parentId`, one call per
+   *  type when `types` is given (the endpoint filters by a single type), concatenated. Bypasses this.apiSlug and hits the
+   *  portal proxy, since the route is exposed through the gateway. no-store plus Cache-Control: no-cache (honored by
+   *  Kong's proxy-cache plugin) keep a stale list from hiding objects that just moved to Live. */
+  async listEnrichmentObjects(parentId: string, types?: string[]): Promise<EnrichmentObject[]> {
+    const url = `${this.baseUrl}${this.portalSlug}/${this.ep.enrichmentList}`;
+    const call = async (enrichmentObjectType?: string): Promise<EnrichmentObject[]> => {
+      const resp = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: { ...this.headers, 'Cache-Control': 'no-cache' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({
+          request: { enrichmentObject: { parentId, ...(enrichmentObjectType ? { enrichmentObjectType } : {}) } },
+        }),
+      });
+      const data = await this.readEnvelope<{ result?: { enrichmentObjects?: EnrichmentObject[] } }>(resp, url);
+      return data.result?.enrichmentObjects ?? [];
+    };
+    if (!types?.length) return call();
+    // One type failing must not discard the others; only a total failure rejects.
+    const settled = await Promise.allSettled(types.map(call));
+    const failed = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failed && settled.every((r) => r.status === 'rejected')) throw failed.reason;
+    return settled.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
   }
 
   /** POST content/v1/publish/{id} */
@@ -327,7 +311,7 @@ export class ContentEditorService {
 
   /** Fetches form field definitions for a content type + action, mirroring the old generic editor's payload, and returns them sorted by `index`. */
   async readFormFields(
-    _subtype: string,
+    subtype: string,
     action: 'save' | 'review' | 'publish',
     opts: { framework?: string; rootOrgId?: string } = {},
   ): Promise<FormField[]> {
@@ -335,9 +319,8 @@ export class ContentEditorService {
     const result = await this.request<FormResp>('POST', this.ep.form, {
       request: {
         type: 'content',
-        // Form config is keyed on a fixed subType ('resource'), not the content's
-        // primaryCategory — matches the old generic editor's form/read call.
-        subType: 'resource',
+        // Fixed 'resource' subType like the old editor, except Dynamic Assess, whose fields live on a form under its own category.
+        subType: subtype === DYNAMIC_ASSESS_ECML_CATEGORY ? subtype : 'resource',
         action,
         framework: opts.framework ?? '*',
         rootOrgId: opts.rootOrgId ?? '*',
@@ -430,6 +413,53 @@ export class ContentEditorService {
         mimeType: c.mimeType ? String(c.mimeType) : undefined,
       };
     });
+  }
+
+  /** Live AssessmentItem counts per skill x level, the availability the job allocates from (same channel + category filters). */
+  async searchAssessmentItemBucketCounts(
+    skills: string[],
+    channel?: string,
+    categoryField = 'skill',
+  ): Promise<Record<string, Record<'E' | 'M' | 'D', number>>> {
+    const levels = [['E', 'EASY'], ['M', 'MEDIUM'], ['D', 'DIFFICULT']] as const;
+    const pairs = skills.flatMap((skill) => levels.map(([key, qlevel]) => ({ skill, key, qlevel })));
+    // limit 1: `count` reflects the total matches regardless of limit.
+    const results = await Promise.all(pairs.map(({ skill, qlevel }) => {
+      const filters: Record<string, unknown> = { status: ['Live'], objectType: 'AssessmentItem', [categoryField]: [skill], qlevel };
+      if (channel) filters.channel = channel;
+      return this.searchCount(filters);
+    }));
+    const out: Record<string, Record<'E' | 'M' | 'D', number>> = {};
+    pairs.forEach(({ skill, key }, i) => {
+      out[skill] = out[skill] ?? { E: 0, M: 0, D: 0 };
+      out[skill][key] = Number(results[i]?.count ?? 0) || 0;
+    });
+    return out;
+  }
+
+  /** One pool count search, retried once so a single transient failure doesn't refuse the whole save; search-service allows no qlevel facet to merge these. */
+  private searchCount(filters: Record<string, unknown>): Promise<{ count?: number }> {
+    const run = () => this.request<{ count?: number }>('POST', this.ep.compositeSearch, { request: { filters, fields: ['identifier'], limit: 1 } });
+    return run().catch(() => run());
+  }
+
+  /** Live AssessmentItems per skill, with the same filters knowlg-service uses to reject a refresh (no channel, any level). */
+  async searchSkillPoolCounts(skills: string[], categoryField = 'skill'): Promise<Record<string, number>> {
+    const results = await Promise.all(skills.map((skill) => this.searchCount({ status: ['Live'], objectType: 'AssessmentItem', [categoryField]: [skill] })));
+    return Object.fromEntries(skills.map((skill, i) => [skill, Number(results[i]?.count ?? 0) || 0]));
+  }
+
+  /** Live system-default frameworks for the Framework picker, channel-scoped via X-Channel-Id, same as question-set editor-v2's searchFrameworks. */
+  async searchFrameworks(channel?: string): Promise<Array<{ identifier: string; name: string }>> {
+    const result = await this.request<{ Framework?: Array<Record<string, unknown>> }>(
+      'POST',
+      this.ep.compositeSearch,
+      { request: { filters: { objectType: 'Framework', status: ['Live'], systemDefault: 'Yes' } } },
+      channel ? { headers: { 'X-Channel-Id': channel } } : undefined,
+    );
+    return (result?.Framework ?? [])
+      .map((f) => ({ identifier: String(f.identifier ?? ''), name: String(f.name ?? f.identifier ?? '') }))
+      .filter((f) => f.identifier);
   }
 
   /** Creates an image Asset record then uploads the file to it (asset/v1/create → asset/v1/upload/{id}), returning the artifact URL. */

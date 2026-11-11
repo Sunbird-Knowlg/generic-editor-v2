@@ -42,29 +42,75 @@ describe('<Header />', () => {
     expect(publish).toHaveBeenCalled();
   });
 
-  it('shows "View transcript" for video content once transcripts exist, and opens the drawer', () => {
-    const setDrawer = vi.fn();
+  it('shows "View transcript" once the content has Transcript objects, and opens the drawer for that type', () => {
+    const openEnrichmentDrawer = vi.fn();
     const ed = makeEd({
-      view: 'player', mode: 'edit', setDrawer, hasTranscripts: true,
+      view: 'player', mode: 'edit', openEnrichmentDrawer, presentEnrichmentTypes: ['Transcript'],
       content: { ...mockContent, mimeType: 'video/mp4' },
     });
     render(<Header ed={ed} />);
     fireEvent.click(screen.getByRole('button', { name: 'View transcript' }));
-    expect(setDrawer).toHaveBeenCalledWith('transcripts');
+    expect(openEnrichmentDrawer).toHaveBeenCalledWith('Transcript');
   });
 
-  it('hides "View transcript" for video content with no transcripts yet (negative)', () => {
+  it('hides "View transcript" when no enrichment type is present (negative)', () => {
     const ed = makeEd({
-      view: 'player', mode: 'edit', hasTranscripts: false,
+      view: 'player', mode: 'edit', presentEnrichmentTypes: [],
       content: { ...mockContent, mimeType: 'video/mp4' },
     });
     render(<Header ed={ed} />);
     expect(screen.queryByRole('button', { name: 'View transcript' })).not.toBeInTheDocument();
   });
 
-  it('hides "View transcript" for non-video content (negative)', () => {
-    const ed = makeEd({ view: 'player', mode: 'edit', content: { ...mockContent, mimeType: 'application/pdf' } });
+  it('skips a present type that has no registry entry (negative)', () => {
+    const ed = makeEd({ view: 'player', mode: 'edit', presentEnrichmentTypes: ['Unknown'] });
     render(<Header ed={ed} />);
     expect(screen.queryByRole('button', { name: 'View transcript' })).not.toBeInTheDocument();
+  });
+
+  it('disables the enrichment button while busy (negative)', () => {
+    const ed = makeEd({ view: 'player', mode: 'edit', busy: true, presentEnrichmentTypes: ['Transcript'] });
+    render(<Header ed={ed} />);
+    expect(screen.getByRole('button', { name: 'View transcript' })).toBeDisabled();
+  });
+});
+
+describe('<Header /> — Regenerate (Dynamic Assess)', () => {
+  it('sits next to Save for the creator once questions exist and re-rolls on click (positive)', () => {
+    const refreshBody = vi.fn();
+    const ed = makeEd({ view: 'player', content: mockContent, mode: 'edit', isDynamicAssess: true, hasGeneratedBody: true, refreshBody });
+    render(<Header ed={ed} />);
+    fireEvent.click(screen.getByRole('button', { name: /Regenerate/ }));
+    expect(refreshBody).toHaveBeenCalled();
+  });
+
+  it('explains a disabled Send for review / Publish with a hover hint (positive)', () => {
+    const creator = makeEd({ view: 'player', content: mockContent, mode: 'edit', isDynamicAssess: true, hasGeneratedBody: false });
+    const { container, unmount } = render(<Header ed={creator} />);
+    expect(screen.getByRole('button', { name: /Send for review/i })).toBeDisabled();
+    expect(container.querySelector('.ce-disabled-hint')).toHaveAttribute('data-tooltip', 'Generate questions before sending for review');
+    unmount();
+    const reviewer = makeEd({ view: 'player', content: mockContent, mode: 'review', isDynamicAssess: true, hasGeneratedBody: true, dynamicAssessStale: true });
+    const { container: c2 } = render(<Header ed={reviewer} />);
+    expect(screen.getByRole('button', { name: /Publish/ })).toBeDisabled();
+    expect(c2.querySelector('.ce-disabled-hint')).toHaveAttribute('data-tooltip', 'Settings changed — generate questions again first');
+  });
+
+  it('adds no hint wrapper for ordinary content (negative)', () => {
+    const { container } = render(<Header ed={makeEd({ view: 'player', content: mockContent, mode: 'edit' })} />);
+    expect(container.querySelector('.ce-disabled-hint')).toBeNull();
+  });
+
+  it('is hidden for reviewers, before any questions exist, and for ordinary content (negative)', () => {
+    const cases = [
+      makeEd({ view: 'player', content: mockContent, mode: 'review', isDynamicAssess: true, hasGeneratedBody: true }),
+      makeEd({ view: 'player', content: mockContent, mode: 'edit', isDynamicAssess: true, hasGeneratedBody: false }),
+      makeEd({ view: 'player', content: mockContent, mode: 'edit', isDynamicAssess: false, hasGeneratedBody: true }),
+    ];
+    for (const ed of cases) {
+      const { unmount } = render(<Header ed={ed} />);
+      expect(screen.queryByRole('button', { name: /Regenerate/ })).not.toBeInTheDocument();
+      unmount();
+    }
   });
 });

@@ -2,18 +2,31 @@ import React from 'react';
 import type { EditorController } from '../useEditor';
 import { t } from '../i18n/i18n';
 import {
-  ImageIcon, PencilIcon, SaveIcon, CloseIcon, SendIcon, UserPlusIcon, CheckIcon, CommentIcon, CaptionsIcon,
+  ImageIcon, PencilIcon, SaveIcon, CloseIcon, SendIcon, UserPlusIcon, CheckIcon, CommentIcon, RefreshIcon,
 } from '../icons';
 import { STATUS } from '../constants';
+import { enrichmentDefinition } from '../services/enrichment/registry';
+import { ENRICHMENT_UI } from './enrichment/enrichmentUi';
+
+/** Hover hint for a disabled button: a disabled button is faded and gets no hover tooltip itself, so the hint sits on a wrapper. */
+const DisabledHint: React.FC<{ hint?: string; children: React.ReactNode }> = ({ hint, children }) => (
+  hint ? <span className="ce-disabled-hint" data-tooltip={hint}>{children}</span> : <>{children}</>
+);
 
 const Header: React.FC<{ ed: EditorController }> = ({ ed }) => {
-  const { content, lang, mode, setDrawer, saveDraft, close, busy, busyAction, setReviewErrors, setReviewSubmitMode, headerLogo, hasReviewComments, hasTranscripts } = ed;
+  const {
+    content, lang, mode, setDrawer, saveDraft, close, busy, busyAction, setReviewErrors, setReviewSubmitMode,
+    headerLogo, hasReviewComments, presentEnrichmentTypes, openEnrichmentDrawer, isDynamicAssess, hasGeneratedBody, dynamicAssessStale,
+    dynamicAssessRefreshing, refreshBody,
+  } = ed;
   const savingDraft = busyAction === 'save-draft';
   const hasContent = !!content?.identifier && ed.view === 'player';
   const isDraft = (content?.status ?? STATUS.DRAFT) === STATUS.DRAFT;
   const title = content?.name || t(lang, 'UNTITLED');
   const canEdit = mode === 'edit';
   const isReviewer = mode === 'review';
+  const dynamicAssessBlocked = isDynamicAssess && (!hasGeneratedBody || dynamicAssessStale);
+  const dynamicAssessBlockedTip = dynamicAssessStale ? 'DYNAMIC_ASSESS_STALE_TIP' : 'DYNAMIC_ASSESS_GENERATE_FIRST';
 
   return (
     <header className="ce-header">
@@ -61,18 +74,24 @@ const Header: React.FC<{ ed: EditorController }> = ({ ed }) => {
           </button>
         )}
 
-        {hasContent && hasTranscripts && (
-          <button
-            type="button"
-            className="ce-icon-btn"
-            onClick={() => setDrawer('transcripts')}
-            disabled={busy}
-            data-tooltip={t(lang, 'VIEW_TRANSCRIPT')}
-            aria-label={t(lang, 'VIEW_TRANSCRIPT')}
-          >
-            <CaptionsIcon size={16} />
-          </button>
-        )}
+        {hasContent && presentEnrichmentTypes.map((type) => {
+          const def = enrichmentDefinition(type);
+          const ui = ENRICHMENT_UI[type];
+          if (!def || !ui) return null;
+          return (
+            <button
+              key={type}
+              type="button"
+              className="ce-icon-btn"
+              onClick={() => openEnrichmentDrawer(type)}
+              disabled={busy}
+              data-tooltip={t(lang, def.headerLabelKey)}
+              aria-label={t(lang, def.headerLabelKey)}
+            >
+              <ui.icon size={16} />
+            </button>
+          );
+        })}
 
         {canEdit && !isReviewer && hasReviewComments && (
           <button
@@ -99,7 +118,20 @@ const Header: React.FC<{ ed: EditorController }> = ({ ed }) => {
             {savingDraft ? <span className="ce-spinner ce-spinner--xs" /> : <SaveIcon size={16} />}
           </button>
         )}
-        
+
+        {/* Dynamic Assess re-roll with unchanged settings; a settings change already regenerates on Save. */}
+        {canEdit && !isReviewer && isDynamicAssess && hasGeneratedBody && (
+          <button
+            type="button"
+            className="ce-btn"
+            onClick={() => void refreshBody()}
+            disabled={busy || dynamicAssessRefreshing}
+            title={t(lang, 'REGENERATE_QUESTIONS_HINT')}
+          >
+            <RefreshIcon size={14} /> {t(lang, 'REGENERATE_QUESTIONS')}
+          </button>
+        )}
+
         <div className="ce-divider" />
 
         {isReviewer ? (
@@ -107,27 +139,31 @@ const Header: React.FC<{ ed: EditorController }> = ({ ed }) => {
             <button type="button" className="ce-btn" onClick={() => setDrawer('review')} disabled={busy}>
               {t(lang, 'REQUEST_CHANGES')}
             </button>
-            <button type="button" className="ce-btn ce-btn--primary" onClick={ed.publish} disabled={busy}>
-              {busyAction === 'publish'
-                ? <><span className="ce-spinner ce-spinner--xs" /> {t(lang, 'PUBLISH')}</>
-                : <><CheckIcon size={13} /> {t(lang, 'PUBLISH')}</>}
-            </button>
+            <DisabledHint hint={dynamicAssessBlocked ? t(lang, dynamicAssessBlockedTip) : undefined}>
+              <button type="button" className="ce-btn ce-btn--primary" onClick={ed.publish} disabled={busy || dynamicAssessBlocked}>
+                {busyAction === 'publish'
+                  ? <><span className="ce-spinner ce-spinner--xs" /> {t(lang, 'PUBLISH')}</>
+                  : <><CheckIcon size={13} /> {t(lang, 'PUBLISH')}</>}
+              </button>
+            </DisabledHint>
           </>
         ) : (
           canEdit && (
-            <button
-              type="button"
-              className="ce-btn ce-btn--primary"
-              onClick={() => {
-                // Always open Edit Content Details pre-filled; user reviews/updates, then submits.
-                setReviewErrors([]);
-                setReviewSubmitMode(true);
-                setDrawer('metadata');
-              }}
-              disabled={busy || !hasContent}
-            >
-              <SendIcon size={13} /> {t(lang, 'SEND_FOR_REVIEW')}
-            </button>
+            <DisabledHint hint={dynamicAssessBlocked ? t(lang, dynamicAssessBlockedTip) : undefined}>
+              <button
+                type="button"
+                className="ce-btn ce-btn--primary"
+                onClick={() => {
+                  // Always open Edit Content Details pre-filled; user reviews/updates, then submits.
+                  setReviewErrors([]);
+                  setReviewSubmitMode(true);
+                  setDrawer('metadata');
+                }}
+                disabled={busy || !hasContent || dynamicAssessBlocked}
+              >
+                <SendIcon size={13} /> {t(lang, 'SEND_FOR_REVIEW')}
+              </button>
+            </DisabledHint>
           )
         )}
 
